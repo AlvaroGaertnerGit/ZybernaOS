@@ -30,6 +30,7 @@ Asistente en *Importar / Exportar*: subir → leer → validar estructura → va
 
 Reglas destacadas:
 
+- Se ejecuta en el Worker (ExcelJS con `nodejs_compat`). En el plan Workers Free (10 ms de CPU) los libros grandes pueden superar el límite: ver CLOUDFLARE.md.
 - Solo `.xlsx`: se comprueba la firma ZIP (no el nombre ni el MIME). Se rechazan libros con macros (`vbaProject.bin`), archivos de más de 4 MB, más de 5.000 filas por hoja o 15.000 en total.
 - Las fórmulas **no se evalúan**: una celda con fórmula es un error ("pega solo los valores").
 - Códigos duplicados dentro del archivo → error. Códigos existentes → **se omiten** por defecto; para actualizarlos hay que elegir "Actualizar" y marcar la confirmación explícita (también exigida en servidor).

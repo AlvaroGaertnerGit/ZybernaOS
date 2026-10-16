@@ -20,7 +20,6 @@ const nextConfig: NextConfig = {
   // Aplicación privada y 100 % dinámica (todo depende de la sesión): se usa el
   // modelo de renderizado dinámico clásico en lugar de Cache Components.
   poweredByHeader: false,
-  serverExternalPackages: ["exceljs"],
   turbopack: {
     rules: {
       "*.css": {

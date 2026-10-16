@@ -1,29 +1,30 @@
-# Despliegue en Vercel
+# Despliegue (Cloudflare Workers)
 
-## Checklist
+Destino: Worker `zyberna-internal` en `https://os.alvarogaertner.com`. Los detalles técnicos están en [CLOUDFLARE.md](CLOUDFLARE.md) y el día a día en [OPERATIONS.md](OPERATIONS.md).
 
-1. **Supabase listo**: migraciones aplicadas, socios autorizados (`supabase/authorize-members.sql`), usuarios creados y registro público desactivado (ver [DATABASE.md](DATABASE.md)).
-2. **Repositorio**: sube el proyecto a GitHub (`.env.local` está ignorado por Git).
-3. **Proyecto en Vercel**: *Add New → Project*, importa el repositorio. Framework: Next.js (autodetectado). Build: `npm run build`.
-4. **Variables de entorno** (Production y Preview):
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-   - `NEXT_PUBLIC_SITE_URL` = `https://<dominio-de-producción>`
-   No añadas la service role key: la app no la necesita.
-5. **Auth URLs en Supabase** (*Authentication → URL Configuration*):
-   - Site URL: `https://<dominio-de-producción>`
-   - Redirect URLs: `https://<dominio-de-producción>/auth/callback` (y, si usas previews, `https://*-<equipo>.vercel.app/auth/callback`).
-6. **Desplegar** y verificar:
-   - `/login` carga, `/dashboard` sin sesión redirige a `/login`.
-   - Login con un socio, crear un cliente de prueba y archivarlo.
-   - Descarga de plantilla y exportación completa.
-   - Recuperación de contraseña: el email lleva a `/auth/callback` → `/recuperar/nueva`.
+## Checklist del primer despliegue
 
-Con la CLI: `npx vercel link`, `npx vercel env add …`, `npx vercel` (preview) y `npx vercel --prod`.
+1. **Supabase**:
+   - Migraciones aplicadas ([DATABASE.md](DATABASE.md)).
+   - Socios autorizados (`supabase/authorize-members.sql`) y sus usuarios creados.
+   - *Authentication → Sign In / Providers*: **Allow new users to sign up** desactivado.
+   - *Authentication → URL Configuration*: *Site URL* `https://os.alvarogaertner.com`; *Redirect URLs* `https://os.alvarogaertner.com/auth/callback` y `http://localhost:3000/auth/callback`.
+2. **Cloudflare**: `npx wrangler login` y comprobar que la zona `alvarogaertner.com` está en la cuenta y que no existe un registro `os`.
+3. **GitHub**:
+   - Repositorio privado.
+   - *Variables*: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` y `CLOUDFLARE_ACCOUNT_ID`.
+   - *Secret* del entorno `production`: `CLOUDFLARE_API_TOKEN` (permisos mínimos, ver CLOUDFLARE.md).
+4. **Dominio**: descomentar `routes` en `wrangler.jsonc` (Custom Domain).
+5. **Desplegar**: merge a `main` (CI) o, la primera vez, `npm run deploy` en local.
+6. **Verificar**:
+   - El certificado TLS es válido.
+   - `/login` responde 200 y `/dashboard` sin sesión redirige a `/login`.
+   - `/robots.txt` contiene `Disallow: /`.
+   - Login de los dos socios, crear y archivar un cliente de prueba, descargar la plantilla y exportar.
+   - La recuperación de contraseña lleva a `https://os.alvarogaertner.com/auth/callback`.
 
 ## Notas
 
-- Las funciones de Vercel limitan el cuerpo de la petición a 4,5 MB, por eso la importación admite como máximo 4 MB.
-- `/api/excel/import` declara `maxDuration = 60`.
-- Las cabeceras de seguridad (HSTS, `X-Frame-Options: DENY`, `nosniff`, CSP `frame-ancestors 'none'`, `X-Robots-Tag: noindex`) se definen en `next.config.ts`.
-- HTTPS lo proporciona Vercel; `upgrade-insecure-requests` solo se emite en producción.
+- Límite de tamaño de importación: 4 MB (validado en servidor).
+- Cabeceras de seguridad en `next.config.ts` (HSTS, CSP `frame-ancestors 'none'`, `X-Frame-Options`, `nosniff`, `noindex`). HTTPS lo gestiona Cloudflare.
+- Si algún día se despliega en otra plataforma Node (por ejemplo Vercel), basta con `next build`: el código no depende de Cloudflare.

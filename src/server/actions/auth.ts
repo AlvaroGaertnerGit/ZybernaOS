@@ -15,7 +15,7 @@ function safeNext(next: FormDataEntryValue | null): string {
 }
 
 async function siteUrl() {
-  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL;
+  const fromEnv = process.env.SITE_URL;
   if (fromEnv) return fromEnv.replace(/\/$/, "");
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host");

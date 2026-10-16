@@ -115,7 +115,7 @@ export const TEMPLATE_FILE_NAME = "ZYBERNA_Plantilla_Clientes.xlsx";
 export const EXAMPLE_PREFIX = "EJEMPLO-";
 
 export const IMPORT_LIMITS = {
-  maxBytes: 4 * 1024 * 1024, // por debajo del límite de 4,5 MB de las funciones de Vercel
+  maxBytes: 4 * 1024 * 1024, // margen holgado bajo los límites de cuerpo de petición de Workers y Vercel
   maxRowsPerSheet: 5_000,
   maxTotalRows: 15_000,
 } as const;

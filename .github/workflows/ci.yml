@@ -1,0 +1,83 @@
+name: CI / Deploy
+
+# Un único sistema despliega: este workflow (no se activa la integración Git de Cloudflare).
+# - Pull requests y ramas: verificación completa (sin desplegar).
+# - main: verificación + despliegue a producción (zyberna-internal).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Valores públicos (se incrustan en el bundle); se guardan como Variables del repositorio.
+  NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - name: Auditoría de dependencias (producción)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Comprobar que no hay secretos versionados
+        run: |
+          if git ls-files | grep -E '(^|/)\.env(\.|$)|\.dev\.vars' | grep -v -E '\.example$'; then
+            echo "Hay archivos de entorno versionados"; exit 1; fi
+      - name: Build de Cloudflare (OpenNext)
+        run: npx opennextjs-cloudflare build
+      - name: Smoke test en el runtime de Workers
+        run: |
+          npx wrangler dev --env "" --port 8787 --ip 127.0.0.1 > wrangler.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:8787/login && break; sleep 2; done
+          npx playwright install --with-deps chromium
+          E2E_BASE_URL=http://127.0.0.1:8787 npx playwright test tests/e2e/auth.spec.ts --project=desktop
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main'
+        with:
+          name: open-next
+          path: .open-next
+          retention-days: 3
+          include-hidden-files: true
+
+  deploy:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: open-next
+          path: .open-next
+      - name: Desplegar en Cloudflare Workers
+        run: npx opennextjs-cloudflare deploy --env ""
+        env:
+          # Token con permisos mínimos: "Workers Scripts: Edit" (+ "Workers Routes: Edit" en la zona).
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

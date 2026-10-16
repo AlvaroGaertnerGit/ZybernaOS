@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Convención: zyberna-<app>[-staging]; clientes: client-<nombre>-<web|app>
+  "name": "zyberna-internal",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  // nodejs_compat: APIs de Node que usan Next.js, @supabase/ssr y ExcelJS.
+  // global_fetch_strictly_public: fetch del Worker solo hacia Internet público.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  // Las variables NEXT_PUBLIC_* se incrustan en el build (públicas, no son secretos).
+  // Se pasan al build (CI o .env.local). SITE_URL es de servidor y se lee en runtime.
+  "vars": {
+    "SITE_URL": "https://os.alvarogaertner.com"
+  },
+  // El dominio personalizado se activa en el primer despliegue autorizado.
+  // "routes": [{ "pattern": "os.alvarogaertner.com", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
+  "env": {
+    "staging": {
+      "name": "zyberna-internal-staging",
+      "workers_dev": true,
+      "preview_urls": false,
+      "vars": { "SITE_URL": "" }
+    }
+  }
+}

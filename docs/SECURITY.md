@@ -2,7 +2,7 @@
 
 ## Autenticación
 
-- Supabase Auth con email y contraseña; sesiones en cookies httpOnly gestionadas por `@supabase/ssr`. El proxy refresca la sesión en cada petición.
+- Supabase Auth con email y contraseña; sesiones en cookies httpOnly gestionadas por `@supabase/ssr`. El middleware refresca la sesión en cada petición.
 - La identidad se verifica con `auth.getClaims()` (JWT validado), nunca con `getSession()` en servidor.
 - Sin registro público: no hay ruta de registro y debe desactivarse "Allow new users to sign up" en Supabase. Aunque alguien lograra crear un usuario, **no tendría perfil** (solo se crea si el email está en `authorized_emails`) y RLS le negaría todo.
 - Tras el login se comprueba la membresía; si no existe, se cierra la sesión.
@@ -12,7 +12,7 @@
 
 | Capa | Mecanismo |
 |---|---|
-| Proxy | Redirige sin sesión; la API responde 401 |
+| Middleware | Redirige sin sesión; la API responde 401 |
 | Servidor | `requireMember()` en layouts/páginas, `assertMember()` en Server Actions y Route Handlers |
 | Base de datos | RLS con `is_member()` en todas las tablas; `anon` sin permisos; funciones RPC `SECURITY INVOKER` que además comprueban `is_member()` |
 
@@ -33,5 +33,7 @@ Preparado para permisos granulares: `profiles.role` (`admin`/`member`) y `is_adm
 - La interfaz no muestra ni permite modificar secretos.
 
 ## Cabeceras
+
+`robots.txt` con `Disallow: /`, metadatos `noindex, nofollow`, sin sitemap. Ninguno de ellos sustituye a la autenticación.
 
 HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy`, CSP (`frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'`), `X-Robots-Tag: noindex` y sin `X-Powered-By`.

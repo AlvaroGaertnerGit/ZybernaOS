@@ -1,0 +1,49 @@
+name: Backup Supabase
+
+# Copia lógica semanal de la base de datos, cifrada con AES-256 (GPG simétrico) y
+# guardada como artefacto privado del repositorio (retención 30 días).
+# Inactivo hasta definir los secretos SUPABASE_DB_URL y BACKUP_PASSPHRASE.
+on:
+  schedule:
+    - cron: "17 3 * * 1" # lunes 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+    steps:
+      - name: Comprobar configuración
+        id: cfg
+        run: |
+          if [ -z "$SUPABASE_DB_URL" ] || [ -z "$BACKUP_PASSPHRASE" ]; then
+            echo "Backup no configurado (faltan secretos). Se omite."; echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.cfg.outputs.skip != 'true'
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Volcado (esquema + datos)
+        if: steps.cfg.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          stamp=$(date -u +%Y%m%dT%H%MZ)
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f schema.sql
+          supabase db dump --db-url "$SUPABASE_DB_URL" --data-only --use-copy -f data.sql
+          tar czf "zyberna-$stamp.tar.gz" schema.sql data.sql
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$BACKUP_PASSPHRASE" \
+              --symmetric --cipher-algo AES256 -o "zyberna-$stamp.tar.gz.gpg" "zyberna-$stamp.tar.gz"
+          rm -f schema.sql data.sql "zyberna-$stamp.tar.gz"
+          echo "FILE=zyberna-$stamp.tar.gz.gpg" >> "$GITHUB_ENV"
+      - if: steps.cfg.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.FILE }}
+          path: ${{ env.FILE }}
+          retention-days: 30

@@ -4,7 +4,7 @@
 
 - **Server Components por defecto.** Las páginas leen datos en servidor con la sesión del usuario. Solo son Client Components las piezas interactivas: formularios, tablas, menús, diálogos y gráficos.
 - **Estado en la URL.** Filtros, búsqueda, ordenación, paginación, pestañas y periodo del dashboard viven en `searchParams`: son compartibles y se resuelven en servidor.
-- **Autorización en tres capas.** (1) `proxy.ts` refresca la sesión y redirige sin sesión; (2) `requireMember()` / `assertMember()` en cada página, Server Action y Route Handler; (3) RLS en PostgreSQL. Las dos primeras son UX y defensa en profundidad; la garantía real es RLS.
+- **Autorización en tres capas.** (1) `middleware.ts` (runtime edge) refresca la sesión y redirige sin sesión; (2) `requireMember()` / `assertMember()` en cada página, Server Action y Route Handler; (3) RLS en PostgreSQL. Las dos primeras son UX y defensa en profundidad; la garantía real es RLS.
 - **Dinero en céntimos enteros** (`bigint` en BD, `number` entero en TS). Nunca se opera con coma flotante sobre importes; el texto se convierte a céntimos por manipulación de cadenas (`parseMoneyToCents`).
 - **Operaciones compuestas transaccionales** mediante funciones RPC de PostgreSQL: alta guiada (cliente + contrataciones + prestaciones), guardado de contratación con prestaciones, generación de cobros e importación Excel.
 
@@ -18,7 +18,7 @@ src/
       dashboard/ clientes/ servicios/ contrataciones/ cobros/ datos/ configuracion/
     api/excel/         template, export, import (Route Handlers, runtime Node)
     auth/callback/     intercambio de código / token_hash de Supabase
-  proxy.ts             refresco de sesión y redirecciones (antes "middleware")
+  middleware.ts        refresco de sesión y redirecciones (runtime edge, ver CLOUDFLARE.md)
   components/
     ui/                primitivas (shadcn personalizadas + Panel, Field, StatusBadge, Stat, NativeSelect…)
     layout/ brand/ data-table/ forms/
@@ -50,9 +50,10 @@ tests/unit · tests/e2e
 ## Rendimiento
 
 - Recharts se carga con `next/dynamic` (`ssr: false`) en un chunk separado, solo en el dashboard.
-- ExcelJS está en `serverExternalPackages` y solo se importa desde Route Handlers: no llega nunca al navegador.
+- ExcelJS solo se importa desde Route Handlers (`server-only`): no llega nunca al navegador. Se empaqueta dentro del Worker.
 - Las tablas piden únicamente la página visible (`range` + `count: exact`).
 - Selects nativos en formularios (ligeros y cómodos en móvil); sin librerías de animación (CSS + `tw-animate-css`), con `prefers-reduced-motion`.
+- Despliegue: Cloudflare Workers mediante OpenNext (ver [CLOUDFLARE.md](CLOUDFLARE.md)).
 - `cacheComponents` está desactivado de forma deliberada: toda la app depende de la sesión y se renderiza dinámicamente.
 
 ## Cálculos
