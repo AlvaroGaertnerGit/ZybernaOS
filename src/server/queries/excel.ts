@@ -11,16 +11,10 @@ import {
 import type { SheetRows } from "@/lib/excel/workbook";
 import type { ImportContext } from "@/lib/excel/validate";
 import type { ServerSupabase } from "@/lib/supabase/server";
+import { fetchAll } from "@/lib/fetch-all";
 import { searchTerm } from "./common";
 
-const MAX = 20_000;
 const units = (cents: number | null) => (cents === null ? null : cents / 100);
-
-async function all<T>(q: PromiseLike<{ data: T[] | null; error: { message: string } | null }>, what: string): Promise<T[]> {
-  const { data, error } = await q;
-  if (error) throw new Error(`No se pudo leer ${what}: ${error.message}`);
-  return data ?? [];
-}
 
 export interface ExportFilters {
   q?: string;
@@ -41,20 +35,22 @@ export async function exportRows(
   type: "clients" | "contracts" | "payments" | "all",
   filters: ExportFilters = {},
 ): Promise<SheetRows> {
-  const members = await all(supabase.from("profiles").select("id, email"), "los miembros");
+  const members = await fetchAll((f, t) => supabase.from("profiles").select("id, email").order("id").range(f, t), "los miembros");
   const ownerEmail = new Map(members.map((m) => [m.id, m.email]));
   const rows: SheetRows = {};
 
   if (type === "clients" || type === "all") {
-    let q = supabase.from("clients").select("*").order("code").limit(MAX);
-    if (type === "clients") {
-      q = filters.archived ? q.not("archived_at", "is", null) : q.is("archived_at", null);
-      if (filters.status && filters.status in CLIENT_STATUS_META) q = q.eq("status", filters.status as keyof typeof CLIENT_STATUS_META);
-      if (filters.owner) q = filters.owner === "none" ? q.is("owner_id", null) : q.eq("owner_id", filters.owner);
-      const term = searchTerm(filters.q);
-      if (term) q = q.or(`trade_name.ilike.%${term}%,contact_name.ilike.%${term}%,email.ilike.%${term}%,code.ilike.%${term}%`);
-    }
-    const clients = await all(q, "los clientes");
+    const clients = await fetchAll((from, to) => {
+      let q = supabase.from("clients").select("*").order("code").range(from, to);
+      if (type === "clients") {
+        q = filters.archived ? q.not("archived_at", "is", null) : q.is("archived_at", null);
+        if (filters.status && filters.status in CLIENT_STATUS_META) q = q.eq("status", filters.status as keyof typeof CLIENT_STATUS_META);
+        if (filters.owner) q = filters.owner === "none" ? q.is("owner_id", null) : q.eq("owner_id", filters.owner);
+        const term = searchTerm(filters.q);
+        if (term) q = q.or(`trade_name.ilike.%${term}%,contact_name.ilike.%${term}%,email.ilike.%${term}%,code.ilike.%${term}%`);
+      }
+      return q;
+    }, "los clientes");
     rows.clients = clients.map((c) => ({
       codigo_cliente: c.code,
       nombre_comercial: c.trade_name,
@@ -73,7 +69,7 @@ export async function exportRows(
   }
 
   if (type === "contracts" || type === "all") {
-    const contracts = await all(supabase.from("client_services_view").select("*").order("code").limit(MAX), "las contrataciones");
+    const contracts = await fetchAll((f, t) => supabase.from("client_services_view").select("*").order("code").range(f, t), "las contrataciones");
     rows.contracts = contracts.map((c) => ({
       codigo_contratacion: c.code,
       codigo_cliente: c.client_code,
@@ -96,8 +92,9 @@ export async function exportRows(
       notas: c.notes,
     }));
     const codeById = new Map(contracts.map((c) => [c.id, c.code]));
-    const deliverables = await all(
-      supabase.from("client_service_deliverables").select("client_service_id, position, title, description").order("position").limit(MAX * 2),
+    const deliverables = await fetchAll(
+      (f, t) =>
+        supabase.from("client_service_deliverables").select("client_service_id, position, title, description").order("id").range(f, t),
       "las prestaciones",
     );
     rows.deliverables = deliverables
@@ -112,17 +109,19 @@ export async function exportRows(
   }
 
   if (type === "payments" || type === "all") {
-    let q = supabase.from("payments_view").select("*").order("code").limit(MAX);
-    if (type === "payments") {
-      const statuses = (filters.status ?? "").split(",").filter((s) => s in PAYMENT_STATUS_META) as (keyof typeof PAYMENT_STATUS_META)[];
-      if (statuses.length) q = q.in("status", statuses);
-      if (filters.client) q = q.eq("client_id", filters.client);
-      if (filters.from) q = q.gte("due_date", filters.from);
-      if (filters.to) q = q.lte("due_date", filters.to);
-      const term = searchTerm(filters.q);
-      if (term) q = q.or(`concept.ilike.%${term}%,client_name.ilike.%${term}%,code.ilike.%${term}%`);
-    }
-    const payments = await all(q, "los cobros");
+    const payments = await fetchAll((from, to) => {
+      let q = supabase.from("payments_view").select("*").order("code").range(from, to);
+      if (type === "payments") {
+        const statuses = (filters.status ?? "").split(",").filter((s) => s in PAYMENT_STATUS_META) as (keyof typeof PAYMENT_STATUS_META)[];
+        if (statuses.length) q = q.in("status", statuses);
+        if (filters.client) q = q.eq("client_id", filters.client);
+        if (filters.from) q = q.gte("due_date", filters.from);
+        if (filters.to) q = q.lte("due_date", filters.to);
+        const term = searchTerm(filters.q);
+        if (term) q = q.or(`concept.ilike.%${term}%,client_name.ilike.%${term}%,code.ilike.%${term}%`);
+      }
+      return q;
+    }, "los cobros");
     rows.payments = payments.map((p) => ({
       codigo_cobro: p.code,
       codigo_cliente: p.client_code,
@@ -145,12 +144,12 @@ export async function exportRows(
 /** Contexto de base de datos necesario para validar una importación. */
 export async function importContext(supabase: ServerSupabase): Promise<ImportContext> {
   const [categories, catalog, members, clients, contracts, payments] = await Promise.all([
-    all(supabase.from("service_categories").select("id, slug, name"), "las categorías"),
-    all(supabase.from("service_catalog").select("id, category_id, name"), "el catálogo"),
-    all(supabase.from("profiles").select("id, email, full_name").eq("is_active", true), "los miembros"),
-    all(supabase.from("clients").select("code, email, trade_name").limit(MAX), "los clientes"),
-    all(supabase.from("client_services_view").select("code, client_code").limit(MAX), "las contrataciones"),
-    all(supabase.from("payments_view").select("code, client_code").limit(MAX * 2), "los cobros"),
+    fetchAll((f, t) => supabase.from("service_categories").select("id, slug, name").order("id").range(f, t), "las categorías"),
+    fetchAll((f, t) => supabase.from("service_catalog").select("id, category_id, name").order("id").range(f, t), "el catálogo"),
+    fetchAll((f, t) => supabase.from("profiles").select("id, email, full_name").eq("is_active", true).order("id").range(f, t), "los miembros"),
+    fetchAll((f, t) => supabase.from("clients").select("code, email, trade_name").order("code").range(f, t), "los clientes"),
+    fetchAll((f, t) => supabase.from("client_services_view").select("code, client_code").order("code").range(f, t), "las contrataciones"),
+    fetchAll((f, t) => supabase.from("payments_view").select("code, client_code").order("code").range(f, t), "los cobros"),
   ]);
   return {
     categories,

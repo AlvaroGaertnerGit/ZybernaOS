@@ -197,3 +197,46 @@ describe("seguridad del archivo", () => {
     expect(unsanitizeCellText("'normal")).toBe("'normal");
   });
 });
+
+describe("Excel procesado en el navegador (filas en JSON)", () => {
+  function bigDataset(n: number): SheetRows {
+    const pad = (i: number, w: number) => String(i + 1).padStart(w, "0");
+    const idx = Array.from({ length: n }, (_, i) => i);
+    return {
+      clients: idx.map((i) => ({ codigo_cliente: `CLI-${pad(i, 5)}`, nombre_comercial: `Cliente ${i}`, email: `c${i}@test.dev`, estado: "activo", responsable: "socio1@zyberna.test", fecha_alta: "2026-01-10", notas: i === 0 ? "=SUM(A1)" : null })),
+      contracts: idx.map((i) => ({ codigo_contratacion: `CON-${pad(i, 5)}`, codigo_cliente: `CLI-${pad(i, 5)}`, categoria: "seo", servicio: "SEO mensual", nombre_plan: "Gestión SEO", precio: 450, moneda: "EUR", tipo_cobro: "recurrente", periodicidad: "mensual", fecha_inicio: "2026-01-10", estado: "activo" })),
+      deliverables: idx.map((i) => ({ codigo_contratacion: `CON-${pad(i, 5)}`, orden: 1, prestacion: "Informe mensual" })),
+      payments: idx.map((i) => ({ codigo_cobro: `COB-${pad(i, 6)}`, codigo_cliente: `CLI-${pad(i, 5)}`, codigo_contratacion: `CON-${pad(i, 5)}`, concepto: "SEO enero", importe: 450, fecha_vencimiento: "2026-01-15", estado: i % 2 ? "cobrado" : "pendiente", fecha_cobro: i % 2 ? "2026-01-14" : null, importe_cobrado: i % 2 ? 450 : null })),
+    };
+  }
+
+  it.each([10, 200, 1200])("con %i filas por hoja, validar las filas reenviadas en JSON da el mismo resultado", async (n) => {
+    const parsed = await roundTrip(bigDataset(n));
+    expect(parsed.errors).toEqual([]);
+    // Lo que el navegador envía al servidor:
+    const sent = JSON.parse(JSON.stringify(parsed.sheets));
+    for (const rows of Object.values(sent) as { values: Record<string, unknown> }[][]) {
+      for (const r of rows) for (const v of Object.values(r.values)) expect(v instanceof Date).toBe(false);
+    }
+    const inBrowser = validateWorkbook(parsed.sheets, baseCtx, "skip");
+    const onServer = validateWorkbook(sent, baseCtx, "skip");
+    expect(inBrowser.errors).toEqual([]);
+    expect(onServer.errors).toEqual([]);
+    expect(onServer.payload).toEqual(inBrowser.payload);
+    expect(onServer.plan.clients.create).toBe(n);
+    expect(onServer.plan.payments.create).toBe(n);
+    // La fórmula llega como texto (no se evalúa) y al exportar se neutraliza.
+    if (n === 10) expect(onServer.payload.clients[0].notes).toBe("=SUM(A1)");
+  }, 60_000);
+
+  it("las fechas se leen como aaaa-mm-dd", async () => {
+    const parsed = await roundTrip(bigDataset(1));
+    expect(parsed.sheets.clients?.[0].values.fecha_alta).toBe("2026-01-10");
+  });
+
+  it("el servidor detecta errores aunque el navegador los ignore (filas manipuladas)", () => {
+    const tampered = { clients: [{ row: 2, values: { codigo_cliente: "CLI-1", nombre_comercial: "", estado: "inventado", fecha_alta: "2026-13-45" } }] };
+    const r = validateWorkbook(tampered, baseCtx, "skip");
+    expect(r.errors.length).toBeGreaterThan(0);
+  });
+});

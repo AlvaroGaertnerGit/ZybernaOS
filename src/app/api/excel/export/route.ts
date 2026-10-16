@@ -2,13 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getMember } from "@/server/auth";
 import { createClient } from "@/lib/supabase/server";
 import { exportRows } from "@/server/queries/excel";
-import { buildWorkbook } from "@/lib/excel/workbook";
 import type { SheetKey } from "@/lib/excel/schema";
 import { isIsoDate, todayIso } from "@/lib/calculations/dates";
-import { xlsxResponse } from "../xlsx-response";
 
 export const runtime = "nodejs";
 
+/**
+ * Filas de la exportación en JSON (mismo esquema que la importación). El navegador genera
+ * el .xlsx con `buildWorkbook`, incluida la protección frente a inyección de fórmulas.
+ */
 const TYPES = {
   clients: { sheets: ["clients"], file: "Clientes" },
   contracts: { sheets: ["contracts", "deliverables"], file: "Contrataciones" },
@@ -44,13 +46,16 @@ export async function GET(request: NextRequest) {
       to: date("to"),
     });
     const { data: categories } = await supabase.from("service_categories").select("slug, name").order("sort_order");
-    const buf = await buildWorkbook({
-      rows,
-      categories: categories ?? [],
-      withInstructions: false,
-      sheets: [...TYPES[type].sheets],
-    });
-    return xlsxResponse(buf, `ZYBERNA_${TYPES[type].file}_${todayIso()}.xlsx`);
+    return NextResponse.json(
+      {
+        kind: "export",
+        fileName: `ZYBERNA_${TYPES[type].file}_${todayIso()}.xlsx`,
+        sheets: [...TYPES[type].sheets],
+        rows,
+        categories: categories ?? [],
+      },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
   } catch (e) {
     console.error("[export]", e instanceof Error ? e.message : e);
     return NextResponse.json({ error: "No se pudo generar la exportación." }, { status: 500 });

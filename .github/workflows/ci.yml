@@ -46,7 +46,7 @@ jobs:
         run: npx opennextjs-cloudflare build
       - name: Smoke test en el runtime de Workers
         run: |
-          npx wrangler dev --env "" --port 8787 --ip 127.0.0.1 > wrangler.log 2>&1 &
+          npx wrangler dev --port 8787 --ip 127.0.0.1 > wrangler.log 2>&1 &
           for i in $(seq 1 60); do curl -sf -o /dev/null http://127.0.0.1:8787/login && break; sleep 2; done
           npx playwright install --with-deps chromium
           E2E_BASE_URL=http://127.0.0.1:8787 npx playwright test tests/e2e/auth.spec.ts --project=desktop
@@ -76,7 +76,7 @@ jobs:
           name: open-next
           path: .open-next
       - name: Desplegar en Cloudflare Workers
-        run: npx opennextjs-cloudflare deploy --env ""
+        run: npx opennextjs-cloudflare deploy
         env:
           # Token con permisos mínimos: "Workers Scripts: Edit" (+ "Workers Routes: Edit" en la zona).
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

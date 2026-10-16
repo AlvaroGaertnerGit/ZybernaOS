@@ -50,33 +50,21 @@ export async function listPayments(filters: PaymentFilters): Promise<Paginated<P
   return { rows, total: res.count ?? rows.length, page, pageSize: PAGE_SIZE };
 }
 
-/** Totales del filtro actual (previsto / cobrado / pendiente). */
+/**
+ * Totales del filtro actual (previsto / cobrado / pendiente), agregados en SQL
+ * (RPC `payment_totals`): exactos con cualquier número de cobros.
+ */
 export async function paymentTotals(filters: PaymentFilters) {
   const supabase = await db();
   const f = normalize(filters);
-  const query = applyFilters(
-    supabase.from("payments_view").select("amount_due_cents, amount_paid_cents, amount_outstanding_cents, status"),
-    f,
-  );
-  const rows = unwrap(await query.limit(20_000), "los totales");
-  let due = 0;
-  let paid = 0;
-  let outstanding = 0;
-  let overdue = 0;
-  for (const r of rows) {
-    if (r.status === "void") continue;
-    due += r.amount_due_cents;
-    paid += r.amount_paid_cents;
-    outstanding += r.amount_outstanding_cents;
-    if (r.status === "overdue") overdue += r.amount_outstanding_cents;
-  }
-  return { due, paid, outstanding, overdue, count: rows.length };
-}
-
-export async function listPaymentsForExport(filters: PaymentFilters = {}, limit = 20_000) {
-  const supabase = await db();
-  const query = applyFilters(supabase.from("payments_view").select("*"), normalize(filters));
-  return unwrap(await query.order("code").limit(limit), "los cobros");
+  const res = await supabase.rpc("payment_totals", {
+    p_statuses: f.statuses.length ? f.statuses : null,
+    p_client: f.client ?? null,
+    p_from: f.from ?? null,
+    p_to: f.to ?? null,
+    p_q: f.q,
+  });
+  return unwrap(res, "los totales") as { due: number; paid: number; outstanding: number; overdue: number; count: number };
 }
 
 export async function getPaymentTransactions(paymentId: string) {

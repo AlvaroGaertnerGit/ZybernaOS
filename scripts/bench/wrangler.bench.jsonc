@@ -1,0 +1,11 @@
+{
+  // Solo para el benchmark local: igual que wrangler.jsonc, pero sin
+  // global_fetch_strictly_public para poder llamar al Supabase simulado en 127.0.0.1.
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "zyberna-bench",
+  "main": "../../.open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "../../.open-next/assets", "binding": "ASSETS" },
+  "vars": { "SITE_URL": "http://127.0.0.1:8788" }
+}

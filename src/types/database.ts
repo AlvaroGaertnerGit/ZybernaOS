@@ -261,6 +261,14 @@ export type Database = {
       replace_catalog_deliverables: { Args: { p_service_id: string; p_items: Json }; Returns: undefined };
       save_contract: { Args: { p_id: string | null; p_values: Json; p_deliverables?: Json | null }; Returns: Json };
       create_client_with_contracts: { Args: { p_client: Json; p_contracts: Json }; Returns: Json };
+      payment_totals: {
+        Args: { p_statuses?: string[] | null; p_client?: string | null; p_from?: string | null; p_to?: string | null; p_q?: string | null };
+        Returns: Json;
+      };
+      dashboard_summary: {
+        Args: { p_period_start: string; p_period_end: string; p_series_start: string; p_today: string };
+        Returns: Json;
+      };
       import_workbook: {
         Args: { p_payload: Json; p_mode: string; p_file_name?: string; p_file_sha256?: string };
         Returns: Json;

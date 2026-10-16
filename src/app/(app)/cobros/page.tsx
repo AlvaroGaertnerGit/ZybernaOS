@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { DownloadIcon } from "lucide-react";
 import { listPayments, paymentTotals } from "@/server/queries/payments";
 import { clientOptions } from "@/server/queries/clients";
 import { contractOptions } from "@/server/queries/contracts";
@@ -9,9 +8,9 @@ import { todayIso } from "@/lib/calculations/dates";
 import { PageHeader } from "@/components/layout/page-header";
 import { Panel, PanelContent } from "@/components/ui/panel";
 import { Stat } from "@/components/ui/stat";
-import { Button } from "@/components/ui/button";
 import { PaymentsTable } from "@/components/payments/payments-table";
 import { NewPaymentButton } from "@/components/payments/new-payment-button";
+import { ExcelDownloadButton } from "@/components/excel/excel-download-button";
 
 export const metadata: Metadata = { title: "Cobros" };
 
@@ -42,11 +41,9 @@ export default async function PaymentsPage({ searchParams }: PageProps<"/cobros"
         description="Cobros previstos, pagos registrados (totales o parciales) e importes pendientes."
         actions={
           <>
-            <Button asChild variant="outline" size="sm">
-              <a href={`/api/excel/export?${exportQs}`} download>
-                <DownloadIcon aria-hidden="true" /> Exportar
-              </a>
-            </Button>
+            <ExcelDownloadButton href={`/api/excel/export?${exportQs}`} variant="outline" size="sm">
+              Exportar
+            </ExcelDownloadButton>
             <NewPaymentButton
               clients={clients}
               contracts={contracts.map((c) => ({ ...c }))}

@@ -16,6 +16,10 @@ export async function GET(request: NextRequest) {
   const tokenHash = searchParams.get("token_hash");
   const type = searchParams.get("type") as EmailOtpType | null;
 
+  // Sin code ni token_hash: enlace con los tokens en el fragmento (#…), que el servidor no ve.
+  // El navegador conserva el fragmento en la redirección y la página cliente lo procesa.
+  if (!code && !tokenHash) return NextResponse.redirect(new URL("/recuperar/enlace", origin));
+
   let ok = false;
   if (code) {
     ok = !(await supabase.auth.exchangeCodeForSession(code)).error;

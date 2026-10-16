@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { DownloadIcon, PlusIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import { listContracts } from "@/server/queries/contracts";
 import { getCategories, pageFrom, param } from "@/server/queries/common";
 import { PageHeader } from "@/components/layout/page-header";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { ContractsTable } from "@/components/contracts/contracts-table";
+import { ExcelDownloadButton } from "@/components/excel/excel-download-button";
 
 export const metadata: Metadata = { title: "Contrataciones" };
 
@@ -30,11 +31,9 @@ export default async function ContractsPage({ searchParams }: PageProps<"/contra
         description="Servicios contratados por cada cliente, con sus condiciones, precio, periodicidad y prestaciones."
         actions={
           <>
-            <Button asChild variant="outline" size="sm">
-              <a href="/api/excel/export?type=contracts" download>
-                <DownloadIcon aria-hidden="true" /> Exportar
-              </a>
-            </Button>
+            <ExcelDownloadButton href="/api/excel/export?type=contracts" variant="outline" size="sm">
+              Exportar
+            </ExcelDownloadButton>
             <Button asChild size="sm">
               <Link href="/contrataciones/nueva">
                 <PlusIcon aria-hidden="true" /> Nueva contratación

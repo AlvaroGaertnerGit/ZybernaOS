@@ -50,7 +50,7 @@ tests/unit · tests/e2e
 ## Rendimiento
 
 - Recharts se carga con `next/dynamic` (`ssr: false`) en un chunk separado, solo en el dashboard.
-- ExcelJS solo se importa desde Route Handlers (`server-only`): no llega nunca al navegador. Se empaqueta dentro del Worker.
+- ExcelJS se ejecuta en el navegador y se carga con `import()` dinámico solo al descargar o importar un Excel. El servidor intercambia JSON (ver EXCEL.md), así el Worker cabe en Workers Free.
 - Las tablas piden únicamente la página visible (`range` + `count: exact`).
 - Selects nativos en formularios (ligeros y cómodos en móvil); sin librerías de animación (CSS + `tw-animate-css`), con `prefers-reduced-motion`.
 - Despliegue: Cloudflare Workers mediante OpenNext (ver [CLOUDFLARE.md](CLOUDFLARE.md)).

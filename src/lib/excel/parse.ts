@@ -1,6 +1,5 @@
-import "server-only";
-
 import ExcelJS from "exceljs";
+import { toIsoDate } from "@/lib/calculations/dates";
 import { IMPORT_LIMITS, SHEETS, SHEET_ORDER, unsanitizeCellText, type SheetKey } from "./schema";
 
 export type RawValue = string | number | boolean | Date | null;
@@ -24,14 +23,27 @@ export interface ParsedWorkbook {
   warnings: ParseIssue[];
 }
 
-/** Comprueba la firma ZIP de un .xlsx y rechaza libros con macros. No confía en el nombre ni en el MIME. */
-export function checkXlsxBuffer(buf: Buffer): string | null {
+/** ¿Contiene `buf` la secuencia ASCII `needle`? (búsqueda de bytes, sin depender de Buffer). */
+function containsAscii(buf: Uint8Array, needle: string): boolean {
+  const n = Array.from(needle, (c) => c.charCodeAt(0));
+  outer: for (let i = 0; i <= buf.length - n.length; i++) {
+    for (let j = 0; j < n.length; j++) if (buf[i + j] !== n[j]) continue outer;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Comprueba la firma ZIP de un .xlsx y rechaza libros con macros. No confía en el nombre ni en el MIME.
+ * Se ejecuta en el navegador (la lectura del libro ya no se hace en el servidor).
+ */
+export function checkXlsxBuffer(buf: Uint8Array): string | null {
   if (buf.length === 0) return "El archivo está vacío.";
   if (buf.length > IMPORT_LIMITS.maxBytes) return `El archivo supera el máximo de ${IMPORT_LIMITS.maxBytes / 1024 / 1024} MB.`;
   if (buf[0] !== 0x50 || buf[1] !== 0x4b || buf[2] !== 0x03 || buf[3] !== 0x04) {
     return "Formato no admitido. Sube un libro de Excel .xlsx (los .xls y .csv no se admiten).";
   }
-  if (buf.includes("xl/vbaProject.bin")) return "El libro contiene macros. Guárdalo como .xlsx sin macros y vuelve a subirlo.";
+  if (containsAscii(buf, "xl/vbaProject.bin")) return "El libro contiene macros. Guárdalo como .xlsx sin macros y vuelve a subirlo.";
   return null;
 }
 
@@ -39,12 +51,12 @@ export function checkXlsxBuffer(buf: Buffer): string | null {
  * Lee el libro sin evaluar fórmulas: una celda con fórmula se rechaza (se pide pegar valores).
  * Devuelve las filas no vacías de cada hoja conocida con su número de fila real.
  */
-export async function parseWorkbook(buf: Buffer): Promise<ParsedWorkbook> {
+export async function parseWorkbook(buf: Uint8Array): Promise<ParsedWorkbook> {
   const errors: ParseIssue[] = [];
   const warnings: ParseIssue[] = [];
   const wb = new ExcelJS.Workbook();
   try {
-    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    await wb.xlsx.load(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer);
   } catch {
     return { sheets: {}, errors: [{ sheet: "—", message: "No se pudo leer el archivo. ¿Está dañado o protegido con contraseña?" }], warnings };
   }
@@ -138,7 +150,8 @@ function cellToText(v: ExcelJS.CellValue): string | null {
 function normalizeCell(v: ExcelJS.CellValue): RawValue {
   if (v === null || v === undefined) return null;
   if (typeof v === "number" || typeof v === "boolean") return v;
-  if (v instanceof Date) return v;
+  // Fechas como ISO (aaaa-mm-dd): las filas viajan en JSON al servidor sin perder el valor.
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : toIsoDate(v);
   const text = cellToText(v);
   if (text === null) return null;
   const trimmed = unsanitizeCellText(text.trim());

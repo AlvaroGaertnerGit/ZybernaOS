@@ -1,10 +1,10 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Convención: zyberna-<app>[-staging]; clientes: client-<nombre>-<web|app>
+  // Convención: zyberna-<app>; clientes: client-<nombre>-<web|app>
   "name": "zyberna-internal",
   "main": ".open-next/worker.js",
   "compatibility_date": "2026-10-01",
-  // nodejs_compat: APIs de Node que usan Next.js, @supabase/ssr y ExcelJS.
+  // nodejs_compat: APIs de Node que usan Next.js y @supabase/ssr (Excel se procesa en el navegador).
   // global_fetch_strictly_public: fetch del Worker solo hacia Internet público.
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": {
@@ -20,16 +20,8 @@
   "vars": {
     "SITE_URL": "https://os.alvarogaertner.com"
   },
-  // El dominio personalizado se activa en el primer despliegue autorizado.
-  // "routes": [{ "pattern": "os.alvarogaertner.com", "custom_domain": true }],
+  // Custom Domain: Cloudflare crea el registro DNS de "os" y su certificado. No toca otros registros.
+  "routes": [{ "pattern": "os.alvarogaertner.com", "custom_domain": true }],
   "workers_dev": false,
-  "preview_urls": false,
-  "env": {
-    "staging": {
-      "name": "zyberna-internal-staging",
-      "workers_dev": true,
-      "preview_urls": false,
-      "vars": { "SITE_URL": "" }
-    }
-  }
+  "preview_urls": false
 }

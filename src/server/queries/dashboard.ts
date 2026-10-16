@@ -1,16 +1,20 @@
 import "server-only";
 
 import { addDays, addMonths, endOfMonth, startOfMonth, todayIso, type IsoDate } from "@/lib/calculations/dates";
-import {
-  collectedBetween,
-  expectedBetween,
-  monthlySeries,
-  mrrByCategory,
-  pendingSummary,
-  serviceDistribution,
-} from "@/lib/calculations/dashboard";
-import { arrFromMrr, totalMrr } from "@/lib/calculations/mrr";
+import type { Cents } from "@/lib/calculations/money";
+import { arrFromMrr } from "@/lib/calculations/mrr";
 import { db, getMembers, unwrap } from "./common";
+
+/** Respuesta de la RPC `dashboard_summary` (mismas definiciones que lib/calculations/dashboard.ts). */
+interface DashboardSummary {
+  collectedInPeriod: Cents;
+  expectedInPeriod: Cents;
+  pending: { overdue: Cents; upcoming: Cents; overdueCount: number; upcomingCount: number };
+  series: { month: IsoDate; collected: Cents; expected: Cents }[];
+  activeContracts: number;
+  mrr: Cents;
+  categories: { category: string; count: number; mrr: Cents }[];
+}
 
 export async function getDashboard(month?: IsoDate) {
   const supabase = await db();
@@ -20,24 +24,16 @@ export async function getDashboard(month?: IsoDate) {
   const seriesStart = addMonths(startOfMonth(today), -11);
   const horizon = addDays(today, 30);
 
-  const [activeClients, contracts, txs, payments, upcoming, overdue, renewals, recentClients, activity, members] =
+  // Cifras agregadas en SQL: exactas con cualquier volumen (la API limita cada respuesta a 1.000 filas).
+  const [activeClients, summary, upcoming, overdue, renewals, recentClients, activity, members] =
     await Promise.all([
       supabase.from("clients").select("id", { count: "exact", head: true }).eq("status", "active").is("archived_at", null),
-      supabase
-        .from("client_services_view")
-        .select("billing_type, periodicity, interval_count, interval_unit, amount_cents, status, category_name")
-        .eq("status", "active")
-        .limit(10_000),
-      supabase
-        .from("payment_transactions")
-        .select("amount_cents, paid_on")
-        .gte("paid_on", seriesStart < periodStart ? seriesStart : periodStart)
-        .limit(50_000),
-      supabase
-        .from("payments_view")
-        .select("amount_due_cents, amount_paid_cents, due_date, voided_at, status")
-        .or(`due_date.gte.${seriesStart < periodStart ? seriesStart : periodStart},status.in.(pending,partial,overdue)`)
-        .limit(50_000),
+      supabase.rpc("dashboard_summary", {
+        p_period_start: periodStart,
+        p_period_end: periodEnd,
+        p_series_start: seriesStart,
+        p_today: today,
+      }),
       supabase
         .from("payments_view")
         .select("id, code, concept, client_id, client_name, due_date, amount_outstanding_cents, currency, status")
@@ -70,11 +66,8 @@ export async function getDashboard(month?: IsoDate) {
       getMembers(),
     ]);
 
-  const contractRows = unwrap(contracts, "las contrataciones");
-  const txRows = unwrap(txs, "los cobros");
-  const paymentRows = unwrap(payments, "los cobros previstos");
-  const mrr = totalMrr(contractRows);
-  const pending = pendingSummary(paymentRows, today);
+  const sum = unwrap(summary, "las métricas") as unknown as DashboardSummary;
+  const pending = { ...sum.pending, total: sum.pending.overdue + sum.pending.upcoming };
   const memberNames = new Map(members.map((m) => [m.id, m.full_name || m.email]));
 
   return {
@@ -82,16 +75,19 @@ export async function getDashboard(month?: IsoDate) {
     period: { start: periodStart, end: periodEnd },
     kpis: {
       activeClients: activeClients.count ?? 0,
-      activeContracts: contractRows.length,
-      mrr,
-      arr: arrFromMrr(mrr),
-      collectedInPeriod: collectedBetween(txRows, periodStart, periodEnd),
-      expectedInPeriod: expectedBetween(paymentRows, periodStart, periodEnd),
+      activeContracts: sum.activeContracts,
+      mrr: sum.mrr,
+      arr: arrFromMrr(sum.mrr),
+      collectedInPeriod: sum.collectedInPeriod,
+      expectedInPeriod: sum.expectedInPeriod,
       pending,
     },
-    series: monthlySeries(txRows, paymentRows, today, 12),
-    mrrByCategory: mrrByCategory(contractRows),
-    distribution: serviceDistribution(contractRows),
+    series: sum.series,
+    mrrByCategory: sum.categories
+      .filter((c) => c.mrr > 0)
+      .map((c) => ({ category: c.category, mrr: c.mrr }))
+      .sort((a, b) => b.mrr - a.mrr),
+    distribution: sum.categories.map((c) => ({ category: c.category, count: c.count })).sort((a, b) => b.count - a.count),
     upcoming: unwrap(upcoming, "los vencimientos"),
     overdue: unwrap(overdue, "los atrasos"),
     renewals: unwrap(renewals, "las renovaciones"),

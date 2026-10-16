@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { DownloadIcon, PlusIcon } from "lucide-react";
+import { PlusIcon } from "lucide-react";
 import { listClients } from "@/server/queries/clients";
 import { getMembers, pageFrom, param } from "@/server/queries/common";
 import { PageHeader } from "@/components/layout/page-header";
 import { Panel } from "@/components/ui/panel";
 import { Button } from "@/components/ui/button";
 import { ClientsTable } from "@/components/clients/clients-table";
+import { ExcelDownloadButton } from "@/components/excel/excel-download-button";
 
 export const metadata: Metadata = { title: "Clientes" };
 
@@ -35,11 +36,9 @@ export default async function ClientsPage({ searchParams }: PageProps<"/clientes
         description="Toda la cartera de la agencia: estado, responsable, servicios activos e ingresos recurrentes."
         actions={
           <>
-            <Button asChild variant="outline" size="sm">
-              <a href={`/api/excel/export?${exportQs}`} download>
-                <DownloadIcon aria-hidden="true" /> {filtered ? "Exportar filtrados" : "Exportar"}
-              </a>
-            </Button>
+            <ExcelDownloadButton href={`/api/excel/export?${exportQs}`} variant="outline" size="sm">
+              {filtered ? "Exportar filtrados" : "Exportar"}
+            </ExcelDownloadButton>
             <Button asChild size="sm">
               <Link href="/clientes/nuevo">
                 <PlusIcon aria-hidden="true" /> Nuevo cliente

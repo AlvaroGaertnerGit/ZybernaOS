@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { DownloadIcon, FileSpreadsheetIcon } from "lucide-react";
+import { FileSpreadsheetIcon } from "lucide-react";
 import { db, unwrap } from "@/server/queries/common";
 import { PageHeader } from "@/components/layout/page-header";
 import { Panel, PanelContent, PanelDescription, PanelHeader, PanelTitle } from "@/components/ui/panel";
-import { Button } from "@/components/ui/button";
 import { ImportWizard } from "@/components/excel/import-wizard";
+import { ExcelDownloadButton } from "@/components/excel/excel-download-button";
 
 export const metadata: Metadata = { title: "Importar / Exportar" };
 
@@ -37,11 +37,15 @@ export default async function DataPage() {
               <PanelTitle>Importar Excel</PanelTitle>
               <PanelDescription>Se valida todo antes de guardar. Nada se escribe si hay errores.</PanelDescription>
             </div>
-            <Button asChild variant="outline" size="sm">
-              <a href="/api/excel/template" download data-testid="download-template">
-                <FileSpreadsheetIcon aria-hidden="true" /> Descargar plantilla Excel
-              </a>
-            </Button>
+            <ExcelDownloadButton
+              href="/api/excel/template"
+              variant="outline"
+              size="sm"
+              icon={<FileSpreadsheetIcon aria-hidden="true" />}
+              data-testid="download-template"
+            >
+              Descargar plantilla Excel
+            </ExcelDownloadButton>
           </PanelHeader>
           <PanelContent className="p-4 sm:p-5">
             <ImportWizard />
@@ -60,11 +64,13 @@ export default async function DataPage() {
                     <p className="text-sm font-medium">{e.title}</p>
                     <p className="text-xs text-subtle-foreground">{e.description}</p>
                   </div>
-                  <Button asChild variant="ghost" size="icon-sm" aria-label={`Descargar ${e.title}`}>
-                    <a href={`/api/excel/export?type=${e.type}`} download data-testid={`export-${e.type}`}>
-                      <DownloadIcon aria-hidden="true" />
-                    </a>
-                  </Button>
+                  <ExcelDownloadButton
+                    href={`/api/excel/export?type=${e.type}`}
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Descargar ${e.title}`}
+                    data-testid={`export-${e.type}`}
+                  />
                 </li>
               ))}
             </ul>

@@ -2,6 +2,7 @@ import "server-only";
 
 import { BILLING_TYPES, CONTRACT_STATUSES, type BillingType, type ContractStatus } from "@/lib/domain";
 import type { ContractsViewRow } from "@/types/database";
+import { fetchAll } from "@/lib/fetch-all";
 import { db, PAGE_SIZE, searchTerm, unwrap, type Paginated } from "./common";
 
 export const CONTRACT_SORTS = ["name", "client_name", "amount_cents", "mrr_cents", "start_date", "next_renewal_date", "status"] as const;
@@ -54,12 +55,14 @@ export async function getContract(id: string) {
 
 export async function contractOptions(clientId?: string) {
   const supabase = await db();
-  let query = supabase
-    .from("client_services")
-    .select("id, code, name, client_id, amount_cents, currency, tax_rate, status")
-    .in("status", ["active", "paused", "draft"])
-    .order("name")
-    .limit(3000);
-  if (clientId) query = query.eq("client_id", clientId);
-  return unwrap(await query, "las contrataciones");
+  return fetchAll((from, to) => {
+    let query = supabase
+      .from("client_services")
+      .select("id, code, name, client_id, amount_cents, currency, tax_rate, status")
+      .in("status", ["active", "paused", "draft"])
+      .order("name")
+      .order("id");
+    if (clientId) query = query.eq("client_id", clientId);
+    return query.range(from, to);
+  }, "las contrataciones");
 }

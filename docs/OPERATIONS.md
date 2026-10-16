@@ -36,7 +36,11 @@ Un rollback de código **no revierte las migraciones SQL**.
 
 ## Gestión de socios
 
-- **Alta**: añadir el email en `authorized_emails` (`supabase/authorize-members.sql`) y crear el usuario en Supabase Auth.
+- **Alta** (p. ej. Sevi), sin interfaz en la app:
+  1. Autorizar el email (SQL Editor o MCP): `insert into public.authorized_emails (email, role, full_name) values ('email@real', 'member', 'Nombre');` (`admin` si debe tener ese rol; hoy ambos roles pueden hacer todo).
+  2. Supabase → *Authentication → Users → Invite user* con ese email. El enlace lleva a `https://os.alvarogaertner.com`, donde crea su contraseña.
+  3. Correo: el SMTP integrado de Supabase **solo entrega a miembros del equipo de la organización** en supabase.com y como máximo 2 emails/hora. Para que llegue la invitación, añade antes a esa persona como miembro de la organización *Zyberna Org* (gratis), o configura un SMTP propio.
+- **Restablecer contraseña**: desde `/recuperar` en la app, o *Users → Send password recovery* en Supabase.
 - **Baja sin borrar datos**: `update public.profiles set is_active = false where email = '…';`
 - El registro público está desactivado; la recuperación de contraseña sigue activa.
 

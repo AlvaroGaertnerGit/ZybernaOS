@@ -1,5 +1,3 @@
-import "server-only";
-
 import ExcelJS from "exceljs";
 import { brand } from "@/config/brand";
 import { isIsoDate, parseIso } from "@/lib/calculations/dates";
@@ -35,7 +33,7 @@ export async function buildWorkbook({
   categories: { slug: string; name: string }[];
   withInstructions: boolean;
   sheets?: SheetKey[];
-}): Promise<Buffer> {
+}): Promise<Uint8Array> {
   const wb = new ExcelJS.Workbook();
   wb.creator = `${brand.name} ${brand.product}`;
   wb.created = new Date();
@@ -107,7 +105,7 @@ export async function buildWorkbook({
 
   addCatalogs(wb, categories);
   const out = await wb.xlsx.writeBuffer();
-  return Buffer.from(out as ArrayBuffer);
+  return new Uint8Array(out as ArrayBuffer);
 }
 
 function toCell(c: SheetColumn, v: CellInput): ExcelJS.CellValue {

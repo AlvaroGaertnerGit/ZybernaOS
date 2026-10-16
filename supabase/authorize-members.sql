@@ -4,7 +4,8 @@
 --
 -- 1. Sustituye los emails y nombres.
 -- 2. Ejecuta este script.
--- 3. Crea los usuarios en Authentication → Users → "Add user" (o "Invite user").
+-- 3. Invita al usuario en Authentication → Users → "Invite user" (ver docs/OPERATIONS.md:
+--    el SMTP integrado solo envía a miembros del equipo de la organización).
 --    El perfil se crea automáticamente al existir el email en esta lista.
 --    Si el usuario ya existía en Auth, el perfil se crea al ejecutar este script.
 

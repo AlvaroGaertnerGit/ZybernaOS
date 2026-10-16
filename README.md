@@ -6,7 +6,7 @@ Acceso exclusivo para los socios autorizados. Sin registro público.
 
 ## Stack
 
-Next.js 16 (App Router, RSC) · TypeScript estricto · Tailwind CSS 4 · shadcn/ui (radix-nova, personalizado) · Lucide · Supabase (PostgreSQL, Auth, RLS) con `@supabase/ssr` · Zod 4 · React Hook Form · TanStack Table 9 · Recharts (carga diferida) · ExcelJS (solo servidor) · Vitest · Playwright · Cloudflare Workers (OpenNext).
+Next.js 16 (App Router, RSC) · TypeScript estricto · Tailwind CSS 4 · shadcn/ui (radix-nova, personalizado) · Lucide · Supabase (PostgreSQL, Auth, RLS) con `@supabase/ssr` · Zod 4 · React Hook Form · TanStack Table 9 · Recharts (carga diferida) · ExcelJS (en el navegador, carga diferida) · Vitest · Playwright · Cloudflare Workers (OpenNext).
 
 Producción: **https://os.alvarogaertner.com**
 
@@ -40,7 +40,7 @@ La aplicación **no usa la service role key**. Ningún secreto se expone ni se p
 2. Autoriza a los socios con `supabase/authorize-members.sql`.
 3. Crea sus usuarios en *Authentication → Users*.
 4. En *Authentication → Sign In / Providers* desactiva **Allow new users to sign up**.
-5. En *Authentication → URL Configuration*: *Site URL* `https://os.alvarogaertner.com`; *Redirect URLs* `https://os.alvarogaertner.com/auth/callback` y `http://localhost:3000/auth/callback`.
+5. En *Authentication → URL Configuration*: *Site URL* `https://os.alvarogaertner.com`; *Redirect URLs* `https://os.alvarogaertner.com/**`.
 
 ## Scripts
 

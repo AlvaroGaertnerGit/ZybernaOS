@@ -36,6 +36,9 @@ interface AnalyzeResponse {
   result?: Record<string, { created?: number; updated?: number; skipped?: number }>;
 }
 
+type Submission = NonNullable<import("@/lib/excel/client").FileAnalysis["submission"]>;
+const MAX_ISSUES = 300;
+
 const MAX_BYTES = 4 * 1024 * 1024;
 const LABELS: Record<keyof Plan, string> = {
   clients: "Clientes",
@@ -53,6 +56,7 @@ export function ImportWizard() {
   const [confirmUpdate, setConfirmUpdate] = useState(false);
   const [busy, setBusy] = useState<"analyze" | "commit" | null>(null);
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
+  const [submission, setSubmission] = useState<Submission | null>(null);
   const [done, setDone] = useState<AnalyzeResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -60,38 +64,56 @@ export function ImportWizard() {
   function reset() {
     setFile(null);
     setAnalysis(null);
+    setSubmission(null);
     setDone(null);
     setError(null);
     setConfirmUpdate(false);
     if (inputRef.current) inputRef.current.value = "";
   }
 
+  /**
+   * analyze: el navegador lee y valida el .xlsx (ExcelJS se carga bajo demanda).
+   * commit: se envían solo las filas leídas; el servidor vuelve a validar e importa en una transacción.
+   */
   async function send(action: "analyze" | "commit", f = file, m = mode) {
     if (!f) return;
     setBusy(action);
     setError(null);
-    const body = new FormData();
-    body.set("file", f);
-    body.set("mode", m);
-    body.set("action", action);
-    if (m === "update" && confirmUpdate) body.set("confirm_update", "yes");
     try {
-      const res = await fetch("/api/excel/import", { method: "POST", body });
-      const json = (await res.json()) as AnalyzeResponse;
-      if (!res.ok && !json.errors) {
-        setError(json.error ?? "No se pudo procesar el archivo.");
+      const excel = await import("@/lib/excel/client");
+      if (action === "analyze") {
+        const a = await excel.analyzeFile(f, m);
+        setSubmission(a.submission);
+        setAnalysis({
+          ok: a.ok,
+          stage: "analyzed",
+          errors: a.errors.slice(0, MAX_ISSUES),
+          errorCount: a.errors.length,
+          warnings: a.warnings.slice(0, MAX_ISSUES),
+          warningCount: a.warnings.length,
+          plan: a.plan,
+          preview: a.preview
+            ? { clients: a.preview.clients.slice(0, 50), contracts: a.preview.contracts.slice(0, 50), payments: a.preview.payments.slice(0, 50) }
+            : null,
+        });
         return;
       }
-      if (action === "commit" && json.stage === "imported") {
-        setDone(json);
+      if (!submission) return;
+      const json = await excel.commitImport(submission, m, m === "update" && confirmUpdate);
+      if (json.ok && json.stage === "imported") {
+        setDone({ ok: true, stage: "imported", errors: [], errorCount: 0, warnings: [], warningCount: 0, plan: null, preview: null, result: json.result });
         toast.success("Importación completada.");
         router.refresh();
-      } else {
-        setAnalysis(json);
-        if (json.error) setError(json.error);
+        return;
       }
-    } catch {
-      setError("No se pudo conectar con el servidor.");
+      setError(json.error ?? "La importación no se completó. No se ha guardado ningún dato.");
+      if (json.errors?.length) {
+        setAnalysis((prev) =>
+          prev ? { ...prev, ok: false, errors: json.errors ?? [], errorCount: json.errorCount ?? json.errors?.length ?? 0 } : prev,
+        );
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo procesar el archivo.");
     } finally {
       setBusy(null);
     }
@@ -130,7 +152,7 @@ export function ImportWizard() {
     );
   }
 
-  const canImport = analysis?.ok && analysis.errorCount === 0 && (mode === "skip" || confirmUpdate);
+  const canImport = analysis?.ok && analysis.errorCount === 0 && submission !== null && (mode === "skip" || confirmUpdate);
   const existing = analysis?.plan ? analysis.plan.clients.existing + analysis.plan.contracts.existing + analysis.plan.payments.existing : 0;
 
   return (
@@ -187,7 +209,7 @@ export function ImportWizard() {
 
       {busy === "analyze" && (
         <p className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
-          <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> Leyendo y validando el archivo…
+          <Loader2Icon className="size-4 animate-spin" aria-hidden="true" /> Leyendo y validando el archivo en tu navegador…
         </p>
       )}
 

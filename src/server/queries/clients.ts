@@ -2,6 +2,7 @@ import "server-only";
 
 import { CLIENT_STATUSES, type ClientStatus } from "@/lib/domain";
 import type { ClientsViewRow } from "@/types/database";
+import { fetchAll } from "@/lib/fetch-all";
 import { db, PAGE_SIZE, searchTerm, unwrap, type Paginated } from "./common";
 
 export const CLIENT_SORTS = ["trade_name", "joined_on", "mrr_cents", "status", "active_services"] as const;
@@ -48,22 +49,6 @@ export async function listClients(filters: ClientFilters): Promise<Paginated<Cli
   return { rows, total: res.count ?? rows.length, page, pageSize };
 }
 
-/** Todos los clientes que cumplen el filtro (para exportación), acotado. */
-export async function listClientsForExport(filters: ClientFilters, limit = 10_000) {
-  const supabase = await db();
-  const f = normalizeClientFilters(filters);
-  let query = supabase.from("clients_view").select("*");
-  if (!filters.archived) query = query.is("archived_at", null);
-  if (f.status) query = query.eq("status", f.status);
-  if (f.owner) query = f.owner === "none" ? query.is("owner_id", null) : query.eq("owner_id", f.owner);
-  if (f.q) {
-    const like = `%${f.q}%`;
-    query = query.or(`trade_name.ilike.${like},contact_name.ilike.${like},email.ilike.${like},code.ilike.${like}`);
-  }
-  const res = await query.order("code").limit(limit);
-  return unwrap(res, "los clientes");
-}
-
 export async function getClient(id: string) {
   const supabase = await db();
   const res = await supabase.from("clients_view").select("*").eq("id", id).maybeSingle();
@@ -107,11 +92,8 @@ export async function getClientDetail(id: string) {
 /** Opciones ligeras para selectores de cliente. */
 export async function clientOptions() {
   const supabase = await db();
-  const res = await supabase
-    .from("clients")
-    .select("id, code, trade_name")
-    .is("archived_at", null)
-    .order("trade_name")
-    .limit(2000);
-  return unwrap(res, "los clientes");
+  return fetchAll(
+    (from, to) => supabase.from("clients").select("id, code, trade_name").is("archived_at", null).order("trade_name").order("id").range(from, to),
+    "los clientes",
+  );
 }

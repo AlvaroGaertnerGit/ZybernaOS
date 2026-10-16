@@ -11,6 +11,11 @@ El despliegue en Cloudflare **no** es una copia de seguridad: los datos viven en
 
 No hay que dar por hecho que existen copias automáticas: compruébalo en *Project Settings → Database → Backups*.
 
+## Estado (16/10/2026)
+
+- **Copia semanal: NO activa.** El repositorio aún no tiene remoto en GitHub y faltan los secretos `SUPABASE_DB_URL` y `BACKUP_PASSPHRASE`. Hasta entonces, la copia disponible es la **exportación Excel completa** (*Importar / Exportar → Exportar todo*), que se puede reimportar.
+- El plan Free de Supabase no hace copias automáticas.
+
 ## Estrategia
 
 1. **Copia lógica semanal cifrada** (`.github/workflows/backup.yml`): `supabase db dump` (esquema + datos), cifrado AES-256 con GPG y guardado como artefacto privado de GitHub durante 30 días. Se activa al definir los secretos del repositorio:
@@ -29,7 +34,7 @@ psql "<cadena-de-conexión-del-proyecto-destino>" -f schema.sql
 psql "<cadena-de-conexión-del-proyecto-destino>" -f data.sql
 ```
 
-Comprobación: iniciar sesión en la app apuntando al proyecto restaurado (cambiando las variables `NEXT_PUBLIC_SUPABASE_*` en un entorno de staging) y verificar el número de clientes, contrataciones y cobros y los importes del dashboard.
+Comprobación: iniciar sesión en la app apuntando al proyecto restaurado (ejecutando la app en local con `npm run preview` y las variables `NEXT_PUBLIC_SUPABASE_*` del proyecto restaurado) y verificar el número de clientes, contrataciones y cobros y los importes del dashboard.
 
 Restauración parcial desde Excel: *Importar / Exportar → Importar* con el modo **Omitir**, que solo crea lo que falta y no sobrescribe nada.
 

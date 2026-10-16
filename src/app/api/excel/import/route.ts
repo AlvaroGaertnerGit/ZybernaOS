@@ -1,95 +1,121 @@
-import { createHash } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
 import { getMember } from "@/server/auth";
 import { createClient } from "@/lib/supabase/server";
 import { importContext } from "@/server/queries/excel";
-import { checkXlsxBuffer, parseWorkbook } from "@/lib/excel/parse";
-import { validateWorkbook, type ImportMode } from "@/lib/excel/validate";
-import { IMPORT_LIMITS } from "@/lib/excel/schema";
+import { validateWorkbook } from "@/lib/excel/validate";
+import { IMPORT_LIMITS, SHEET_ORDER } from "@/lib/excel/schema";
 import type { Json } from "@/types/database";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
 
 const MAX_ISSUES = 300;
+/** El JSON de 15.000 filas ocupa ≈ 4,6 MB; se deja margen sobre el máximo de filas. */
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 /**
- * POST multipart: file (.xlsx), mode ("skip" | "update"), action ("analyze" | "commit").
- * analyze → valida y devuelve la previsualización. commit → vuelve a validar en
- * servidor (no confía en el análisis previo) e importa en una única transacción.
+ * GET: contexto para validar en el navegador (códigos existentes, categorías, catálogo, miembros).
+ * El navegador lee el .xlsx con ExcelJS, valida y muestra la previsualización sin subir el archivo.
+ */
+export async function GET() {
+  const member = await getMember();
+  if (!member) return NextResponse.json({ error: "Tu sesión ha caducado." }, { status: 401 });
+  try {
+    const ctx = await importContext(await createClient());
+    return NextResponse.json(ctx, { headers: { "Cache-Control": "private, no-store" } });
+  } catch (e) {
+    console.error("[import]", e instanceof Error ? e.message : e);
+    return NextResponse.json({ error: "No se pudo preparar la validación." }, { status: 500 });
+  }
+}
+
+const cell = z.union([z.string().max(5000), z.number(), z.boolean(), z.null()]);
+const rawRow = z.object({ row: z.number().int().min(2).max(1_048_576), values: z.record(z.string().max(60), cell) });
+const sheet = z.array(rawRow).max(IMPORT_LIMITS.maxRowsPerSheet);
+const bodySchema = z.object({
+  mode: z.enum(["skip", "update"]),
+  confirm_update: z.boolean().optional(),
+  file_name: z.string().max(255),
+  file_sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  sheets: z.object({
+    clients: sheet.optional(),
+    contracts: sheet.optional(),
+    deliverables: sheet.optional(),
+    payments: sheet.optional(),
+  }),
+});
+
+/**
+ * POST JSON: filas leídas del .xlsx en el navegador. Validación DEFINITIVA en servidor
+ * (`validateWorkbook` con el contexto actual de la BD, sin fiarse del análisis del navegador)
+ * e importación en una única transacción (RPC `import_workbook`, que además comprueba
+ * membresía, tipos, enums, claves foráneas, unicidad y restricciones CHECK).
  */
 export async function POST(request: NextRequest) {
   const member = await getMember();
   if (!member) return NextResponse.json({ error: "Tu sesión ha caducado." }, { status: 401 });
 
   const length = Number(request.headers.get("content-length") ?? 0);
-  if (length > IMPORT_LIMITS.maxBytes + 64 * 1024) {
-    return NextResponse.json({ error: "El archivo supera el tamaño máximo de 4 MB." }, { status: 413 });
-  }
+  if (length > MAX_BODY_BYTES) return NextResponse.json({ error: "El archivo es demasiado grande." }, { status: 413 });
 
-  let form: FormData;
+  let parsedBody: z.infer<typeof bodySchema>;
   try {
-    form = await request.formData();
+    const text = await request.text();
+    if (text.length > MAX_BODY_BYTES) return NextResponse.json({ error: "El archivo es demasiado grande." }, { status: 413 });
+    const result = bodySchema.safeParse(JSON.parse(text));
+    if (!result.success) return NextResponse.json({ error: "Solicitud no válida." }, { status: 400 });
+    parsedBody = result.data;
   } catch {
     return NextResponse.json({ error: "Solicitud no válida." }, { status: 400 });
   }
-  const file = form.get("file");
-  const mode: ImportMode = form.get("mode") === "update" ? "update" : "skip";
-  const action = form.get("action") === "commit" ? "commit" : "analyze";
-  const confirmUpdate = form.get("confirm_update") === "yes";
-  if (!(file instanceof File)) return NextResponse.json({ error: "Adjunta un archivo .xlsx." }, { status: 400 });
-
-  const buf = Buffer.from(await file.arrayBuffer());
-  const problem = checkXlsxBuffer(buf);
-  if (problem) return NextResponse.json({ error: problem }, { status: 400 });
-  const sha256 = createHash("sha256").update(buf).digest("hex");
-
-  const parsed = await parseWorkbook(buf);
-  const supabase = await createClient();
-  const ctx = await importContext(supabase);
-  const result = parsed.errors.length
-    ? null
-    : validateWorkbook(parsed.sheets, ctx, mode);
-
-  const errors = [...parsed.errors, ...(result?.errors ?? [])];
-  const warnings = [...parsed.warnings, ...(result?.warnings ?? [])];
-  const summary = {
-    errors: errors.slice(0, MAX_ISSUES),
-    errorCount: errors.length,
-    warnings: warnings.slice(0, MAX_ISSUES),
-    warningCount: warnings.length,
-    plan: result?.plan ?? null,
-    preview: result
-      ? {
-          clients: result.preview.clients.slice(0, 50),
-          contracts: result.preview.contracts.slice(0, 50),
-          payments: result.preview.payments.slice(0, 50),
-        }
-      : null,
-    sha256,
-  };
-
-  if (action === "analyze" || errors.length > 0 || !result) {
-    return NextResponse.json({ ok: errors.length === 0, stage: "analyzed", ...summary });
+  const { mode, sheets } = parsedBody;
+  const total = SHEET_ORDER.reduce((acc, k) => acc + (sheets[k]?.length ?? 0), 0);
+  if (total > IMPORT_LIMITS.maxTotalRows) {
+    return NextResponse.json({ error: `El libro supera el máximo de ${IMPORT_LIMITS.maxTotalRows} filas en total.` }, { status: 400 });
   }
-
-  if (mode === "update" && !confirmUpdate) {
+  if (mode === "update" && !parsedBody.confirm_update) {
     return NextResponse.json({ error: "Confirma explícitamente la actualización de registros existentes." }, { status: 400 });
   }
 
+  const supabase = await createClient();
+  let result;
+  try {
+    result = validateWorkbook(sheets, await importContext(supabase), mode);
+  } catch (e) {
+    console.error("[import]", e instanceof Error ? e.message : e);
+    return NextResponse.json({ ok: false, stage: "failed", error: "No se pudo validar el archivo." }, { status: 500 });
+  }
+  if (result.errors.length > 0) {
+    // El estado de la BD cambió desde el análisis en el navegador (o el cliente no es de confianza).
+    return NextResponse.json(
+      {
+        ok: false,
+        stage: "analyzed",
+        error: "La validación en el servidor encontró errores. No se ha guardado nada.",
+        errors: result.errors.slice(0, MAX_ISSUES),
+        errorCount: result.errors.length,
+        warnings: result.warnings.slice(0, MAX_ISSUES),
+        warningCount: result.warnings.length,
+        plan: result.plan,
+        preview: null,
+      },
+      { status: 422 },
+    );
+  }
+
   // Nombre del archivo solo como metadato (saneado), nunca como ruta ni para decidir el formato.
-  const safeName = file.name.replace(/[^\w.\- ]+/g, "_").slice(0, 120);
+  const safeName = parsedBody.file_name.replace(/[^\w.\- ]+/g, "_").slice(0, 120);
   const { data, error } = await supabase.rpc("import_workbook", {
     p_payload: result.payload as unknown as Json,
     p_mode: mode,
     p_file_name: safeName,
-    p_file_sha256: sha256,
+    p_file_sha256: parsedBody.file_sha256,
   });
   if (error) {
     console.error("[import]", error.code, error.message);
     const message =
       error.code === "P0001" ? error.message : error.code === "23505" ? "Conflicto de códigos duplicados. Vuelve a analizar el archivo." : "La importación no se completó. No se ha guardado ningún dato.";
-    return NextResponse.json({ ok: false, stage: "failed", error: message, ...summary }, { status: 422 });
+    return NextResponse.json({ ok: false, stage: "failed", error: message }, { status: 422 });
   }
-  return NextResponse.json({ ok: true, stage: "imported", result: data, ...summary });
+  return NextResponse.json({ ok: true, stage: "imported", result: data, plan: result.plan });
 }

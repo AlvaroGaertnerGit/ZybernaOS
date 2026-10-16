@@ -4,6 +4,9 @@ PostgreSQL en Supabase. Migraciones en `supabase/migrations/` (aplicar en orden)
 
 1. `20261016090000_core_schema.sql` — tipos, tablas, índices, vistas, triggers, RLS y catálogo inicial.
 2. `20261016090100_rpc_functions.sql` — funciones transaccionales.
+3. `20261016120000_aggregates.sql` — agregados en SQL (`payment_totals`, `dashboard_summary`) y correcciones del linter.
+
+Prueba de agregados con más de 1.000 registros (transacción que se deshace, ejecutada como miembro para aplicar RLS): `supabase/tests/aggregates_over_1000.sql`.
 
 ## Tablas
 
@@ -46,6 +49,10 @@ Vistas (`security_invoker = true`, respetan RLS): `clients_view` (servicios acti
 | `replace_contract_deliverables`, `replace_catalog_deliverables` | Reordenar/editar/eliminar prestaciones |
 | `create_scheduled_payments(contract, items)` | Generación idempotente (`on conflict do nothing`), máx. 24 periodos por llamada |
 | `import_workbook(payload, mode, file_name, sha256)` | Importación Excel completa en una transacción |
+| `payment_totals(statuses, client, from, to, q)` | Totales del listado de cobros (mismos filtros que la tabla) |
+| `dashboard_summary(period_start, period_end, series_start, today)` | Cobrado, previsto, pendiente, serie de 12 meses y MRR por categoría |
+
+**Límite de 1.000 filas.** La API de Supabase devuelve como máximo 1.000 filas por petición (*Max rows*). Los totales se agregan en SQL (las dos RPC anteriores) y las listas largas (exportación, contexto de importación, selectores) se piden por páginas con `fetchAll` (`src/lib/fetch-all.ts`). Nada se suma en JavaScript sobre filas descargadas.
 
 ## Aplicar migraciones
 
