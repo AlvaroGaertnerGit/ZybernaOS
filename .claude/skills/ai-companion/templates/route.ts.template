@@ -1,0 +1,46 @@
+// src/app/api/companion/chat/route.ts
+//
+// Server-only. Never import this file's dependencies (`ai`, `@ai-sdk/*`)
+// from a "use client" component — call this endpoint via the
+// use-companion-chat hook instead.
+//
+// Verified against Vercel AI SDK v5 docs: streamText, convertToModelMessages,
+// toUIMessageStreamResponse, abortSignal forwarding, consumeSseStream for
+// onFinish-on-abort, onError for safe client-facing error messages.
+
+import { streamText, convertToModelMessages, type UIMessage, consumeStream } from "ai";
+import { getModel } from "@/lib/ai/providers";
+import { buildSystemPrompt } from "@/lib/ai/system-prompt";
+
+// Keep this well under your host's function timeout; a companion chat
+// reply should finish streaming in well under 30s.
+export const maxDuration = 30;
+
+export async function POST(req: Request) {
+  const { messages }: { messages: UIMessage[] } = await req.json();
+
+  const result = streamText({
+    model: getModel(),
+    system: buildSystemPrompt(),
+    messages: convertToModelMessages(messages),
+    // Forward the client's abort (e.g. user clicks Stop, or navigates
+    // away) so the provider request is actually cancelled server-side.
+    abortSignal: req.signal,
+    onAbort: () => {
+      // Hook for cleanup/analytics if you add message persistence later.
+    },
+  });
+
+  return result.toUIMessageStreamResponse({
+    // consumeSseStream + onFinish is what makes onFinish fire even when
+    // the client aborts mid-stream — otherwise abort cleanup never runs.
+    consumeSseStream: consumeStream,
+    onError: (error) => {
+      // Never leak raw provider error text to the client — it can
+      // contain request/account details. Log server-side, return a
+      // generic message the UI can render.
+      console.error("[companion/chat]", error);
+      return "Something went wrong generating a response. Try again.";
+    },
+  });
+}

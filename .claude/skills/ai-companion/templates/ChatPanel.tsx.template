@@ -1,0 +1,146 @@
+// src/components/companion/ChatPanel.tsx
+//
+// Presentational only — no "ai" or "@ai-sdk/*" import anywhere in this
+// file. It receives everything as props from useCompanionChat() (see
+// use-companion-chat.ts.template) via a thin parent. That boundary is
+// what makes this component testable/storyboardable without a live
+// model, and is what audit-companion.mjs checks for.
+//
+// Message shape mirrors Vercel AI SDK v5's `UIMessage` (role + parts[]).
+// Once @ai-sdk/react is installed, replace CompanionMessage below with
+// `import type { UIMessage } from "ai"` and drop this local type.
+//
+// Styling: semantic tokens + cva only — see the design-system skill
+// before changing any className here. Composition/API shape follows
+// the ui-components skill (data-slot, className-first, cn() merge last).
+
+import * as React from "react"
+
+import { cn } from "@/lib/utils"
+
+type CompanionMessagePart = { type: "text"; text: string }
+type CompanionMessage = {
+  id: string
+  role: "user" | "assistant" | "system"
+  parts: CompanionMessagePart[]
+}
+type CompanionStatus = "ready" | "submitted" | "streaming" | "error"
+
+interface ChatPanelProps {
+  messages: CompanionMessage[]
+  status: CompanionStatus
+  error?: Error
+  onSend: (text: string) => void
+  onRetry: () => void
+  onStop: () => void
+  className?: string
+}
+
+function ChatPanel({
+  messages,
+  status,
+  error,
+  onSend,
+  onRetry,
+  onStop,
+  className,
+}: ChatPanelProps) {
+  const [input, setInput] = React.useState("")
+  const isBusy = status === "submitted" || status === "streaming"
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const text = input.trim()
+    if (!text || isBusy) return
+    onSend(text)
+    setInput("")
+  }
+
+  return (
+    <div
+      data-slot="chat-panel"
+      className={cn("flex h-full flex-col rounded-lg border border-border bg-card", className)}
+    >
+      {/* aria-live announces streamed replies to screen readers without
+          re-announcing the whole transcript on every token. */}
+      <div
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        className="flex-1 space-y-3 overflow-y-auto p-4"
+      >
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            data-slot="chat-message"
+            data-role={message.role}
+            className={cn(
+              "max-w-[80%] rounded-lg px-3 py-2 text-sm",
+              message.role === "user"
+                ? "ml-auto bg-primary text-primary-foreground"
+                : "bg-muted text-foreground"
+            )}
+          >
+            {message.parts
+              .filter((part) => part.type === "text")
+              .map((part, i) => (
+                <span key={i}>{part.text}</span>
+              ))}
+          </div>
+        ))}
+
+        {status === "submitted" && (
+          <div className="flex items-center gap-1 text-sm text-muted-foreground" aria-hidden="true">
+            <span className="animate-pulse">Thinking…</span>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 border-t border-border bg-destructive/10 px-4 py-2 text-sm text-destructive"
+        >
+          <span>Something went wrong. Try again?</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="rounded-md px-2 py-1 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t border-border p-3">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          disabled={isBusy}
+          placeholder="Ask about a project, or how something was built…"
+          aria-label="Message"
+          className="h-10 flex-1 rounded-md border border-border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+        />
+        {isBusy ? (
+          <button
+            type="button"
+            onClick={onStop}
+            className="h-10 shrink-0 rounded-md border border-border px-3 text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="submit"
+            disabled={!input.trim()}
+            className="h-10 shrink-0 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+          >
+            Send
+          </button>
+        )}
+      </form>
+    </div>
+  )
+}
+
+export { ChatPanel, type ChatPanelProps, type CompanionMessage }

@@ -1,0 +1,31 @@
+// src/lib/ai/providers.ts
+//
+// The ONE place provider/model config lives. Route handlers and any
+// other server-side AI code import `registry`/`DEFAULT_MODEL` from here
+// instead of constructing `@ai-sdk/*` providers themselves — that's what
+// `audit-companion.mjs`'s `scattered-provider-config` rule checks for.
+//
+// Adding a provider later (the "multiple LLM providers" requirement) is
+// a one-line addition to createProviderRegistry — nothing else in the
+// app needs to change, since callers only ever ask the registry for
+// "<provider>:<model>" by string id.
+//
+// Verified against Vercel AI SDK v5 docs (createProviderRegistry).
+
+import { anthropic } from "@ai-sdk/anthropic";
+// Add more providers as needed, e.g.:
+// import { openai } from "@ai-sdk/openai";
+import { createProviderRegistry } from "ai";
+
+export const registry = createProviderRegistry({
+  anthropic,
+  // openai,
+});
+
+// "<provider>:<model>" — matches registry.languageModel()'s id format.
+export const DEFAULT_MODEL =
+  process.env.AI_COMPANION_MODEL ?? "anthropic:claude-sonnet-4-5";
+
+export function getModel(modelId: string = DEFAULT_MODEL) {
+  return registry.languageModel(modelId);
+}

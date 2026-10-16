@@ -1,0 +1,55 @@
+// Template: component with visual variants (variant/size), styled via cva.
+// Modeled on src/components/ui/button.tsx.
+//
+// - Non-interactive (badges, tags, callouts, ...): base it on a plain
+//   element as shown below.
+// - Interactive (anything clickable/focusable/toggleable): don't build
+//   the interaction/accessibility logic by hand — wrap the matching
+//   @base-ui/react primitive instead (see button.tsx: `import { X as
+//   XPrimitive } from "@base-ui/react/x"`), or run
+//   `npx shadcn add <component>` if one already exists upstream.
+//
+// Copy into src/components/{ui,<feature>}/<name>.tsx and replace ComponentName.
+
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+
+import { cn } from "@/lib/utils"
+
+const componentNameVariants = cva(
+  // Base classes shared by every variant — semantic tokens only.
+  "inline-flex items-center rounded-md text-sm font-medium",
+  {
+    variants: {
+      variant: {
+        default: "bg-secondary text-secondary-foreground",
+        outline: "border border-border bg-background text-foreground",
+      },
+      size: {
+        default: "h-6 px-2",
+        sm: "h-5 px-1.5 text-xs",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+)
+
+function ComponentName({
+  className,
+  variant,
+  size,
+  ...props
+}: React.ComponentProps<"div"> & VariantProps<typeof componentNameVariants>) {
+  return (
+    <div
+      data-slot="component-name"
+      className={cn(componentNameVariants({ variant, size, className }))}
+      {...props}
+    />
+  )
+}
+
+export { ComponentName, componentNameVariants }

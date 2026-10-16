@@ -1,36 +1,65 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Zyberna Internal OS
 
-## Getting Started
+Aplicación web privada para gestionar la agencia Zyberna: clientes, catálogo de servicios, contrataciones con prestaciones personalizadas, cobros (totales y parciales), métricas (MRR/ARR, cobrado, pendiente) e importación/exportación Excel.
 
-First, run the development server:
+Acceso exclusivo para los socios autorizados. Sin registro público.
+
+## Stack
+
+Next.js 16 (App Router, RSC) · TypeScript estricto · Tailwind CSS 4 · shadcn/ui (radix-nova, personalizado) · Lucide · Supabase (PostgreSQL, Auth, RLS) con `@supabase/ssr` · Zod 4 · React Hook Form · TanStack Table 9 · Recharts (carga diferida) · ExcelJS (solo servidor) · Vitest · Playwright · Vercel.
+
+## Puesta en marcha
+
+Requisitos: Node 20.9+ (probado con Node 24) y npm.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local      # rellena las variables de Supabase
+npm run dev                     # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+> Si estás detrás de un proxy que intercepta TLS (redes corporativas o educativas), ejecuta Node con
+> `NODE_OPTIONS=--use-system-ca` para que confíe en los certificados del sistema.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Variables de entorno
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Dónde | Descripción |
+|---|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | local + Vercel | URL del proyecto Supabase |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | local + Vercel | Clave publicable (segura en navegador; RLS protege los datos) |
+| `NEXT_PUBLIC_SITE_URL` | Vercel (recomendado) | URL pública, usada en los enlaces de recuperación de contraseña |
+| `E2E_EMAIL`, `E2E_PASSWORD` | `.env.test.local` | Usuario autorizado para los tests E2E |
 
-## Learn More
+La aplicación **no usa la service role key**. Ningún secreto se expone ni se puede editar desde la interfaz.
 
-To learn more about Next.js, take a look at the following resources:
+## Supabase
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Aplica las migraciones de `supabase/migrations/` en orden (ver [docs/DATABASE.md](docs/DATABASE.md)).
+2. Autoriza a los socios con `supabase/authorize-members.sql`.
+3. Crea sus usuarios en *Authentication → Users*.
+4. En *Authentication → Sign In / Providers* desactiva **Allow new users to sign up**.
+5. En *Authentication → URL Configuration* define la *Site URL* y añade `https://<tu-dominio>/auth/callback` a las *Redirect URLs* (y `http://localhost:3000/auth/callback` para desarrollo).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Scripts
 
-## Deploy on Vercel
+```bash
+npm run dev          # desarrollo
+npm run build        # build de producción
+npm run start        # servir el build
+npm run lint         # ESLint
+npm run typecheck    # TypeScript sin emitir
+npm test             # Vitest (unitarias)
+npm run test:e2e     # Playwright (levanta `next start` en el puerto 3100; requiere build)
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Documentación
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [Arquitectura](docs/ARCHITECTURE.md)
+- [Base de datos](docs/DATABASE.md)
+- [Excel](docs/EXCEL.md)
+- [Despliegue](docs/DEPLOYMENT.md)
+- [Seguridad](docs/SECURITY.md)
+
+## Identidad visual
+
+La identidad es provisional y está centralizada: tokens en `src/app/globals.css`, logotipo en `src/components/brand/logo.tsx` y `src/app/icon.svg`, textos en `src/config/brand.ts` y tipografía en `src/app/layout.tsx`.

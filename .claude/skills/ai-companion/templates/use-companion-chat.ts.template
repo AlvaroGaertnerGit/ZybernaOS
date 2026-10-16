@@ -1,0 +1,31 @@
+// src/hooks/use-companion-chat.ts
+//
+// The ONE place `useChat` is called. Presentational components (see
+// ChatPanel.tsx.template) take the values this returns as props — they
+// never import `@ai-sdk/react` or know an endpoint URL exists. That
+// split is what audit-companion.mjs's `server-only-ai-import-in-client`
+// check and the `ui-components` skill's composition rules are protecting.
+//
+// Verified against Vercel AI SDK v5 docs (@ai-sdk/react useChat,
+// DefaultChatTransport, status/error/regenerate/stop).
+
+"use client";
+
+import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
+
+export function useCompanionChat() {
+  const { messages, sendMessage, status, error, regenerate, stop } = useChat({
+    transport: new DefaultChatTransport({ api: "/api/companion/chat" }),
+  });
+
+  return {
+    messages,
+    status, // "ready" | "submitted" | "streaming" | "error"
+    error,
+    isBusy: status === "submitted" || status === "streaming",
+    send: (text: string) => sendMessage({ text }),
+    retry: () => regenerate(),
+    stop,
+  };
+}

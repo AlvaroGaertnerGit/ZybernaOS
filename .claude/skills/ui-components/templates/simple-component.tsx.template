@@ -1,0 +1,28 @@
+// Template: presentational component, no visual variants.
+// Modeled on src/components/ui/card.tsx (shadcn base-nova style).
+// Use for compound/structural pieces (Header/Content/Footer-style parts)
+// that only need one look. If you need variant/size props, start from
+// variant-component.tsx.template instead.
+//
+// Copy into src/components/{ui,<feature>}/<name>.tsx and replace ComponentName.
+
+import * as React from "react"
+
+import { cn } from "@/lib/utils"
+
+function ComponentName({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="component-name"
+      className={cn(
+        // Semantic tokens only — see the design-system skill before
+        // picking colors/spacing/radius here.
+        "rounded-lg border border-border bg-card text-card-foreground",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { ComponentName }

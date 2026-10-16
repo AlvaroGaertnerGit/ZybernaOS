@@ -1,0 +1,49 @@
+# Companion onboarding flow
+
+The first 3 seconds decide whether a visitor engages with the companion
+at all. Design the empty state, not just the chat itself.
+
+## Empty state (before the first message)
+
+1. **Greeting** — one sentence, in the companion's voice (see
+   `system-prompt.ts.template`), stating what it can actually help
+   with. Not "Hi! How can I help you today?" (generic chatbot copy —
+   would fail the `portfolio-writing` skill's `lint-copy.mjs`).
+   > "Ask me about any project here, or how something was built."
+2. **Suggested prompts** — 3-4 tappable chips with real questions this
+   companion can actually answer well, sourced from real content on the
+   site. Not generic ("Tell me about yourself") — specific to what's on
+   this page.
+   > "How was the checkout redesign measured?" · "What's the stack
+   > behind this site?" · "Show me the CSV parser project"
+3. Chips populate the input and auto-send on tap — don't make the
+   visitor retype a question they already selected.
+
+## First message sent
+
+- Render the user's message **immediately** (optimistic, before the
+  network round trip resolves) — `useChat`'s `sendMessage` already does
+  this. Never show a blank screen while waiting for the request to even
+  start.
+- Show the "Thinking…" state (`status === "submitted"`) within the same
+  frame the user's message appears — no gap where nothing is happening.
+- First assistant tokens should appear well under 2s for a snappy feel;
+  see `reference/patterns.md` for the latency techniques that get you
+  there.
+
+## Returning visitor
+
+- If conversation history persists across a session (localStorage or
+  server-side), restore it — don't force a re-greeting every visit.
+- If it doesn't persist (fine for a v1), the empty state should still
+  reappear cleanly, not show a flash of a previous stale state.
+
+## Error/edge states to design for, not just handle
+
+- Model fails / times out → the `ChatPanel.tsx.template` error banner +
+  retry, not a silent failure or a raw stack trace.
+- Visitor sends a message while offline → detect and show "You're
+  offline" rather than an infinite spinner.
+- Visitor asks something wildly off-topic → the system prompt's
+  boundary section handles this at the model level; verify the reply
+  actually redirects gracefully rather than refusing curtly.
