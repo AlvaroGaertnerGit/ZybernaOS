@@ -11,6 +11,7 @@ import {
   INTERVAL_UNIT_META,
   PAYMENT_STATUS_META,
   PERIODICITY_META,
+  VARIABLE_BASIS_META,
 } from "@/lib/domain";
 
 export type ColumnKind = "text" | "code" | "email" | "date" | "money" | "percent" | "integer" | "list";
@@ -33,6 +34,7 @@ export const LISTS = {
   periodicidades: Object.values(PERIODICITY_META).map((m) => m.excel),
   unidades_intervalo: Object.values(INTERVAL_UNIT_META).map((m) => m.excel),
   monedas: [...CURRENCIES],
+  bases_variable: Object.values(VARIABLE_BASIS_META).map((m) => m.excel),
 } as const;
 export type ListName = keyof typeof LISTS | "categorias";
 
@@ -61,19 +63,23 @@ export const SHEETS = {
       { key: "codigo_contratacion", required: true, kind: "code", width: 18, description: "Código único de la contratación. Ej. CON-0001" },
       { key: "codigo_cliente", required: true, kind: "code", width: 16, description: "Código del cliente (hoja CLIENTES o ya existente)" },
       { key: "categoria", required: true, kind: "list", list: "categorias", width: 22, description: "Categoría del catálogo" },
-      { key: "servicio", kind: "text", width: 26, description: "Servicio del catálogo (opcional)" },
-      { key: "nombre_plan", required: true, kind: "text", width: 26, description: "Nombre personalizado de la contratación" },
+      { key: "servicio", kind: "text", width: 26, description: "Servicio o plan del catálogo (nombre o identificador). Aplica sus reglas: planes alternativos, dependencias e incompatibilidades" },
+      { key: "nombre_plan", required: true, kind: "text", width: 26, description: "Nombre de la contratación (puede personalizarse)" },
+      { key: "proyecto", kind: "text", width: 20, description: "Proyecto o web (opcional). Permite el mismo plan para webs distintas del cliente" },
       { key: "descripcion", kind: "text", width: 32, description: "Descripción" },
-      { key: "precio", required: true, kind: "money", width: 12, description: "Precio por periodo (o total si es pago único), sin impuestos" },
+      { key: "precio", required: true, kind: "money", width: 12, description: "Precio acordado por periodo (o total si es pago único), sin impuestos" },
+      { key: "tarifa_catalogo", kind: "money", width: 15, description: "Solo informativo (exportación): tarifa del catálogo al contratar. Se ignora al importar" },
       { key: "impuesto_pct", kind: "percent", width: 12, description: "Impuesto en % (opcional; vacío = sin impuesto)" },
       { key: "moneda", kind: "list", list: "monedas", width: 9, description: "EUR por defecto" },
-      { key: "tipo_cobro", required: true, kind: "list", list: "tipos_cobro", width: 12, description: "unico o recurrente" },
-      { key: "periodicidad", kind: "list", list: "periodicidades", width: 14, description: "Obligatoria si es recurrente" },
+      { key: "tipo_cobro", required: true, kind: "list", list: "tipos_cobro", width: 12, description: "Modalidad: unico o recurrente" },
+      { key: "periodicidad", kind: "list", list: "periodicidades", width: 14, description: "Modalidad: obligatoria si es recurrente" },
       { key: "intervalo_cada", kind: "integer", width: 13, description: "Solo periodicidad personalizada: cada cuántas unidades" },
       { key: "intervalo_unidad", kind: "list", list: "unidades_intervalo", width: 15, description: "Solo personalizada: dias, semanas, meses o anos" },
       { key: "fecha_inicio", required: true, kind: "date", width: 13, description: "Fecha de inicio" },
       { key: "fecha_fin", kind: "date", width: 13, description: "Fecha de finalización (opcional)" },
       { key: "proxima_renovacion", kind: "date", width: 16, description: "Próxima renovación (opcional)" },
+      { key: "variable_pct", kind: "percent", width: 12, description: "Componente variable en % (opcional, p. ej. 8)" },
+      { key: "variable_base", kind: "list", list: "bases_variable", width: 14, description: "Base del variable: beneficios, ingresos o facturacion" },
       { key: "estado", kind: "list", list: "estados_contratacion", width: 13, description: "borrador, activo, pausado, finalizado o cancelado" },
       { key: "responsable", kind: "text", width: 24, description: "Email o nombre del socio responsable" },
       { key: "notas", kind: "text", width: 32, description: "Notas" },

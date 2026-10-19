@@ -1,23 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FormProvider, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, InfoIcon, Loader2Icon, PlusIcon, Trash2Icon } from "lucide-react";
 import { clientSchema, wizardContractSchema, type ClientFormValues, type WizardContractValues } from "@/lib/validations/schemas";
 import { createClientWithContractsAction } from "@/server/actions/clients";
 import { CLIENT_STATUS_META, PERIODICITY_META, type IntervalUnit, type Periodicity } from "@/lib/domain";
-import { formatMoney, parseMoneyToCents } from "@/lib/calculations/money";
-import { monthlyRecurringCents, periodicityLabel } from "@/lib/calculations/mrr";
+import { formatMoney, formatPercent, parseMoneyToCents } from "@/lib/calculations/money";
+import { periodicityLabel } from "@/lib/calculations/mrr";
+import { economicSummary, priceDeviation } from "@/lib/calculations/summary";
+import { findViolations, hasUnmetRequirements, requirementLabel, selectService } from "@/lib/catalog/rules";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Panel, PanelContent, PanelFooter } from "@/components/ui/panel";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { useServerAction } from "@/components/forms/use-action";
+import { ConfirmDialog } from "@/components/forms/confirm-dialog";
 import type { CategoryOption, MemberOption } from "@/components/forms/form-utils";
 import { ContractFields } from "@/components/contracts/contract-fields";
-import { contractDefaultsFromCatalog, type CatalogOption } from "@/components/contracts/catalog-option";
+import { EconomicSummaryPanel } from "@/components/contracts/economic-summary";
+import {
+  contractDefaultsFromCatalog,
+  isCustomized,
+  summaryLineFromValues,
+  type CatalogOption,
+} from "@/components/contracts/catalog-option";
 import { ClientFields } from "./client-fields";
 
 const wizardFormSchema = z.object({
@@ -27,6 +37,8 @@ const wizardFormSchema = z.object({
 type WizardValues = { client: ClientFormValues; contracts: WizardContractValues[] };
 
 const STEPS = ["Datos básicos", "Servicios", "Precios", "Confirmación"] as const;
+
+type Confirmation = { title: string; description: React.ReactNode; confirmLabel: string; apply: () => void };
 
 export function ClientWizard({
   members,
@@ -45,6 +57,8 @@ export function ClientWizard({
 }) {
   const router = useRouter();
   const [step, setStep] = useState(0);
+  const [confirm, setConfirm] = useState<Confirmation | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const form = useForm<WizardValues>({
     resolver: zodResolver(wizardFormSchema) as never,
     mode: "onBlur",
@@ -72,19 +86,98 @@ export function ClientWizard({
   const watched = useWatch({ control: form.control, name: "contracts" }) ?? [];
   const { run, pending } = useServerAction();
   const otherCategory = categories.find((c) => c.slug === "other")?.id ?? categories[0]?.id ?? "";
+  const byId = useMemo(() => new Map(catalog.map((s) => [s.id, s])), [catalog]);
 
-  const selectedIds = new Set(watched.map((c) => c.service_id).filter(Boolean));
+  const selectedIds = watched.map((c) => c.service_id).filter((v): v is string => Boolean(v));
+  const summary = economicSummary(watched.map((c) => summaryLineFromValues(c, catalog)));
+  const defaults = (svc: CatalogOption) =>
+    contractDefaultsFromCatalog(svc, { categoryId: otherCategory, currency: defaultCurrency, ownerId: currentMemberId });
+  const indexOf = (serviceId: string) => form.getValues("contracts").findIndex((c) => c.service_id === serviceId);
+  const nameOf = (serviceId: string) => byId.get(serviceId)?.name ?? "servicio";
 
-  function toggleService(svc: CatalogOption) {
-    const idx = watched.findIndex((c) => c.service_id === svc.id);
-    if (idx >= 0) contracts.remove(idx);
-    else contracts.append(contractDefaultsFromCatalog(svc, { categoryId: otherCategory, currency: defaultCurrency, ownerId: currentMemberId }));
+  /**
+   * Marca o desmarca un servicio aplicando las reglas del catálogo: las alternativas e
+   * incompatibles se desmarcan solas y los servicios que dependían de lo quitado también.
+   * Si se van a perder personalizaciones o dependientes, se pide confirmación.
+   */
+  function changeSelection(svc: CatalogOption, action: "select" | "deselect") {
+    const before = selectedIds;
+    const { selected: after, removed } =
+      action === "select" ? selectService(before, svc.id, catalog) : { selected: before.filter((x) => x !== svc.id), removed: [svc.id] };
+    const broken = after.filter((x) => hasUnmetRequirements(x, after, catalog) && !hasUnmetRequirements(x, before, catalog));
+    const dropped = [...removed, ...broken];
+    const current = form.getValues("contracts");
+    const customized = dropped.filter((x) => {
+      const i = indexOf(x);
+      return i >= 0 && isCustomized(current[i], byId.get(x));
+    });
+
+    const apply = () => {
+      const values = form.getValues("contracts");
+      const indexes = dropped.map((x) => values.findIndex((c) => c.service_id === x)).filter((i) => i >= 0);
+      if (action === "select") {
+        // La alternativa sustituye a la anterior en su misma posición (sin sumar importes).
+        const target = removed.length ? values.findIndex((c) => c.service_id === removed[0]) : -1;
+        const rest = indexes.filter((i) => i !== target);
+        if (target >= 0) contracts.update(target, defaults(svc));
+        if (rest.length) contracts.remove(rest);
+        if (target < 0) contracts.append(defaults(svc));
+      } else if (indexes.length) {
+        contracts.remove(indexes);
+      }
+      const parts: string[] = [];
+      for (const x of removed.filter((r) => r !== svc.id)) {
+        const kind = byId.get(x)?.exclusive_group && byId.get(x)?.exclusive_group === svc.exclusive_group ? "sustituido por" : "quitado: no es compatible con";
+        parts.push(`«${nameOf(x)}» ${kind} «${svc.name}».`);
+      }
+      for (const x of broken) parts.push(`«${nameOf(x)}» quitado: requiere ${requirementLabel(byId.get(x)!, catalog)}.`);
+      setNotice(parts.length ? parts.join(" ") : null);
+    };
+
+    if (customized.length || broken.length) {
+      setConfirm({
+        title: action === "select" ? `¿Cambiar a «${svc.name}»?` : `¿Quitar «${svc.name}»?`,
+        description: (
+          <span className="flex flex-col gap-2">
+            {customized.length > 0 && (
+              <span>
+                Se perderán los cambios de precio, modalidad o prestaciones de: <strong>{customized.map(nameOf).join(", ")}</strong>.
+              </span>
+            )}
+            {broken.length > 0 && (
+              <span>
+                También se quitará <strong>{broken.map(nameOf).join(", ")}</strong>, porque requiere{" "}
+                {requirementLabel(byId.get(broken[0])!, catalog)}.
+              </span>
+            )}
+          </span>
+        ),
+        confirmLabel: action === "select" ? "Sustituir" : "Quitar",
+        apply,
+      });
+    } else {
+      apply();
+    }
+  }
+
+  function removeContract(i: number) {
+    const sid = watched[i]?.service_id;
+    const svc = sid ? byId.get(sid) : undefined;
+    if (svc) changeSelection(svc, "deselect");
+    else contracts.remove(i);
   }
 
   async function next() {
     if (step === 0) {
       const ok = await form.trigger("client");
       if (!ok) return;
+    }
+    if (step === 1 || step === 2) {
+      const violations = findViolations(watched, catalog);
+      if (violations.length) {
+        setNotice(violations[0].message);
+        return;
+      }
     }
     if (step === 2) {
       const ok = await form.trigger("contracts");
@@ -94,10 +187,12 @@ export function ClientWizard({
       setStep(3);
       return;
     }
+    setNotice(null);
     setStep((s) => Math.min(s + 1, 3));
   }
 
   function back() {
+    setNotice(null);
     if (step === 3 && watched.length === 0) setStep(1);
     else setStep((s) => Math.max(s - 1, 0));
   }
@@ -110,7 +205,6 @@ export function ClientWizard({
     });
   }
 
-  const totalMrr = watched.reduce((acc, c) => acc + estimateMrr(c), 0);
   const client = useWatch({ control: form.control, name: "client" });
 
   return (
@@ -152,51 +246,21 @@ export function ClientWizard({
                 <>
                   <StepHeading
                     title="¿Qué servicios contrata?"
-                    description="Elige del catálogo o añade uno personalizado. También puedes guardar el cliente sin servicios."
+                    description="Cada servicio carga su tarifa y sus prestaciones del catálogo. Los planes alternativos se sustituyen entre sí; los complementos se suman."
                   />
                   <div className="flex flex-col gap-5">
                     {categories
                       .filter((cat) => catalog.some((s) => s.category_id === cat.id && s.status === "active"))
                       .map((cat) => (
-                        <fieldset key={cat.id}>
-                          <legend className="eyebrow mb-2">{cat.name}</legend>
-                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                            {catalog
-                              .filter((s) => s.category_id === cat.id && s.status === "active")
-                              .map((s) => {
-                                const checked = selectedIds.has(s.id);
-                                return (
-                                  <label
-                                    key={s.id}
-                                    className={cn(
-                                      "group/svc flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-surface p-3 transition-[border-color,background-color,box-shadow] duration-(--motion-duration-fast) hover:border-border-strong has-focus-visible:ring-2 has-focus-visible:ring-ring",
-                                      checked && "border-primary/50 bg-tone-info/40 shadow-xs",
-                                    )}
-                                  >
-                                    <input type="checkbox" className="sr-only" checked={checked} onChange={() => toggleService(s)} />
-                                    <span
-                                      aria-hidden="true"
-                                      className={cn(
-                                        "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border border-border-strong transition-colors",
-                                        checked && "border-primary bg-primary text-primary-foreground",
-                                      )}
-                                    >
-                                      {checked && <CheckIcon className="size-3" />}
-                                    </span>
-                                    <span className="flex min-w-0 flex-col gap-0.5">
-                                      <span className="text-sm font-medium">{s.name}</span>
-                                      <span className="text-xs text-subtle-foreground">
-                                        {s.suggested_billing_type === "one_time"
-                                          ? "Pago único"
-                                          : PERIODICITY_META[s.suggested_periodicity ?? "monthly"].label}
-                                        {s.default_price_cents != null && ` · desde ${formatMoney(s.default_price_cents, s.currency)}`}
-                                      </span>
-                                    </span>
-                                  </label>
-                                );
-                              })}
-                          </div>
-                        </fieldset>
+                        <CategoryServices
+                          key={cat.id}
+                          name={cat.name}
+                          services={catalog.filter((s) => s.category_id === cat.id && s.status === "active")}
+                          catalog={catalog}
+                          selectedIds={selectedIds}
+                          onSelect={(svc) => changeSelection(svc, "select")}
+                          onDeselect={(svc) => changeSelection(svc, "deselect")}
+                        />
                       ))}
                     <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4">
                       <Button
@@ -211,8 +275,8 @@ export function ClientWizard({
                       >
                         <PlusIcon aria-hidden="true" /> Servicio personalizado
                       </Button>
-                      <span className="text-xs text-subtle-foreground" aria-live="polite">
-                        {watched.length} seleccionado(s)
+                      <span className="text-xs text-subtle-foreground">
+                        {watched.length} seleccionado(s){watched.some((c) => !c.service_id) && " · incluye servicios a medida"}
                       </span>
                     </div>
                   </div>
@@ -221,7 +285,10 @@ export function ClientWizard({
 
               {step === 2 && (
                 <>
-                  <StepHeading title="Precios y condiciones" description="Ajusta precio, periodicidad y prestaciones de cada servicio. Todo es negociable." />
+                  <StepHeading
+                    title="Precios y condiciones"
+                    description="Se proponen las tarifas del catálogo. Ajusta precio, modalidad y prestaciones para este cliente: el catálogo no cambia."
+                  />
                   <div className="flex flex-col gap-4">
                     {contracts.fields.map((field, i) => (
                       <section key={field.id} className="rounded-lg border border-border">
@@ -231,7 +298,7 @@ export function ClientWizard({
                             type="button"
                             variant="ghost"
                             size="icon-sm"
-                            onClick={() => contracts.remove(i)}
+                            onClick={() => removeContract(i)}
                             aria-label={`Quitar ${watched[i]?.name || `servicio ${i + 1}`}`}
                           >
                             <Trash2Icon aria-hidden="true" />
@@ -268,34 +335,46 @@ export function ClientWizard({
                       </p>
                     ) : (
                       <ul className="divide-y divide-border">
-                        {watched.map((c, i) => (
-                          <li key={i} className="flex items-center justify-between gap-3 px-4 py-3">
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-medium">{c.name}</p>
-                              <p className="text-xs text-subtle-foreground">
-                                {c.billing_type === "one_time"
-                                  ? "Pago único"
-                                  : periodicityLabel(
-                                      (c.periodicity || null) as Periodicity | null,
-                                      c.interval_count ? Number(c.interval_count) : null,
-                                      (c.interval_unit || null) as IntervalUnit | null,
-                                    )}{" "}
-                                · {c.deliverables.length} prestación(es)
-                              </p>
-                            </div>
-                            <span className="tabular text-sm">{formatMoney(parseMoneyToCents(c.amount) ?? 0, c.currency)}</span>
-                          </li>
-                        ))}
+                        {watched.map((c, i) => {
+                          const line = summaryLineFromValues(c, catalog);
+                          const dev = priceDeviation(line.amount_cents, line.list_price_cents);
+                          return (
+                            <li key={i} className="flex items-center justify-between gap-3 px-4 py-3">
+                              <div className="min-w-0">
+                                <p className="flex flex-wrap items-center gap-2 truncate text-sm font-medium">
+                                  {c.name}
+                                  {dev && dev.diff !== 0 && <StatusBadge tone="info">Precio personalizado</StatusBadge>}
+                                </p>
+                                <p className="text-xs text-subtle-foreground">
+                                  {c.billing_type === "one_time"
+                                    ? "Pago único"
+                                    : periodicityLabel(
+                                        (c.periodicity || null) as Periodicity | null,
+                                        c.interval_count ? Number(c.interval_count) : null,
+                                        (c.interval_unit || null) as IntervalUnit | null,
+                                      )}{" "}
+                                  · {c.deliverables.length} prestación(es)
+                                  {line.variable_rate && ` · + ${formatPercent(line.variable_rate)} % variable`}
+                                </p>
+                              </div>
+                              <span className="tabular text-sm">{formatMoney(parseMoneyToCents(c.amount) ?? 0, c.currency)}</span>
+                            </li>
+                          );
+                        })}
                       </ul>
-                    )}
-                    {watched.length > 0 && (
-                      <div className="tabular flex justify-between border-t border-border bg-surface-sunken/60 px-4 py-2.5 text-sm">
-                        <span className="text-muted-foreground">MRR estimado</span>
-                        <strong className="font-medium">{formatMoney(totalMrr, defaultCurrency)}/mes</strong>
-                      </div>
                     )}
                   </div>
                 </>
+              )}
+
+              {step > 0 && (watched.length > 0 || step === 1) && (
+                <EconomicSummaryPanel summary={summary} currency={defaultCurrency} className="mt-6" />
+              )}
+              {notice && step > 0 && (
+                <p role="status" className="mt-4 flex gap-2 rounded-lg bg-tone-info px-3 py-2 text-sm text-tone-info-foreground">
+                  <InfoIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                  {notice}
+                </p>
               )}
             </div>
           </PanelContent>
@@ -321,21 +400,165 @@ export function ClientWizard({
           </PanelFooter>
         </Panel>
       </form>
+      <ConfirmDialog
+        open={confirm !== null}
+        onOpenChange={(o) => !o && setConfirm(null)}
+        title={confirm?.title ?? ""}
+        description={confirm?.description}
+        confirmLabel={confirm?.confirmLabel ?? "Confirmar"}
+        onConfirm={() => {
+          confirm?.apply();
+          setConfirm(null);
+        }}
+      />
     </FormProvider>
   );
 }
 
-function estimateMrr(c: WizardContractValues) {
-  if (c.billing_type !== "recurring") return 0;
-  const cents = parseMoneyToCents(c.amount);
-  if (cents === null) return 0;
-  return monthlyRecurringCents({
-    billing_type: "recurring",
-    periodicity: (c.periodicity || null) as Periodicity | null,
-    interval_count: c.interval_count ? Number(c.interval_count) : null,
-    interval_unit: (c.interval_unit || null) as IntervalUnit | null,
-    amount_cents: cents,
-  });
+/** Precio y periodicidad de la tarifa principal, para las tarjetas de selección. */
+function priceText(s: CatalogOption) {
+  const when = s.suggested_billing_type === "one_time" ? "Pago único" : PERIODICITY_META[s.suggested_periodicity ?? "monthly"].label;
+  const suffix = s.suggested_billing_type === "one_time" ? "" : s.suggested_periodicity === "monthly" ? "/mes" : "";
+  const price = s.default_price_cents != null ? `${formatMoney(s.default_price_cents, s.currency)}${suffix}` : "Precio a medida";
+  const extra = s.modalities.length ? ` · +${s.modalities.length} modalidad(es)` : "";
+  return `${when} · ${price}${extra} · ${s.deliverables.length} prestaciones`;
+}
+
+/**
+ * Servicios de una categoría. Los de un mismo grupo de alternativas se muestran como un
+ * grupo de opciones (solo una, con «Ninguno»); el resto, como casillas independientes.
+ */
+function CategoryServices({
+  name,
+  services,
+  catalog,
+  selectedIds,
+  onSelect,
+  onDeselect,
+}: {
+  name: string;
+  services: CatalogOption[];
+  catalog: CatalogOption[];
+  selectedIds: string[];
+  onSelect: (svc: CatalogOption) => void;
+  onDeselect: (svc: CatalogOption) => void;
+}) {
+  const groups = new Map<string, CatalogOption[]>();
+  const singles: CatalogOption[] = [];
+  for (const s of services) {
+    if (s.exclusive_group) groups.set(s.exclusive_group, [...(groups.get(s.exclusive_group) ?? []), s]);
+    else singles.push(s);
+  }
+  const byPrice = (a: CatalogOption, b: CatalogOption) =>
+    (a.default_price_cents ?? Number.MAX_SAFE_INTEGER) - (b.default_price_cents ?? Number.MAX_SAFE_INTEGER) || a.name.localeCompare(b.name);
+
+  return (
+    <fieldset>
+      <legend className="eyebrow mb-2">{name}</legend>
+      <div className="flex flex-col gap-3">
+        {[...groups.entries()].map(([group, items]) => {
+          const chosen = items.find((s) => selectedIds.includes(s.id));
+          return (
+            <div key={group} role="radiogroup" aria-label={`${name}: elige una opción`} className="flex flex-col gap-2">
+              <p className="text-xs text-subtle-foreground">Planes alternativos · elige uno como máximo</p>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {[...items].sort(byPrice).map((s) => (
+                  <ServiceCard
+                    key={s.id}
+                    svc={s}
+                    type="radio"
+                    name={`group-${group}`}
+                    checked={chosen?.id === s.id}
+                    disabledReason={null}
+                    onToggle={() => onSelect(s)}
+                  />
+                ))}
+                <label
+                  className={cn(
+                    "flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground transition-colors hover:border-border-strong has-focus-visible:ring-2 has-focus-visible:ring-ring",
+                    !chosen && "border-primary/50 text-foreground",
+                  )}
+                >
+                  <input type="radio" className="sr-only" name={`group-${group}`} checked={!chosen} onChange={() => chosen && onDeselect(chosen)} />
+                  <Indicator type="radio" checked={!chosen} />
+                  Ninguno
+                </label>
+              </div>
+            </div>
+          );
+        })}
+        {singles.length > 0 && (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {singles.map((s) => {
+              const checked = selectedIds.includes(s.id);
+              const unmet = !checked && hasUnmetRequirements(s.id, [...selectedIds, s.id], catalog);
+              return (
+                <ServiceCard
+                  key={s.id}
+                  svc={s}
+                  type="checkbox"
+                  checked={checked}
+                  disabledReason={unmet ? `Requiere ${requirementLabel(s, catalog)}` : null}
+                  onToggle={() => (checked ? onDeselect(s) : onSelect(s))}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </fieldset>
+  );
+}
+
+function ServiceCard({
+  svc,
+  type,
+  name,
+  checked,
+  disabledReason,
+  onToggle,
+}: {
+  svc: CatalogOption;
+  type: "radio" | "checkbox";
+  name?: string;
+  checked: boolean;
+  disabledReason: string | null;
+  onToggle: () => void;
+}) {
+  const disabled = Boolean(disabledReason);
+  return (
+    <label
+      data-testid={`service-${svc.key}`}
+      className={cn(
+        "group/svc flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-surface p-3 transition-[border-color,background-color,box-shadow] duration-(--motion-duration-fast) hover:border-border-strong has-focus-visible:ring-2 has-focus-visible:ring-ring",
+        checked && "border-primary/50 bg-tone-info/40 shadow-xs",
+        disabled && "cursor-not-allowed opacity-60 hover:border-border",
+      )}
+    >
+      <input type={type} name={name} className="sr-only" checked={checked} disabled={disabled} onChange={onToggle} />
+      <Indicator type={type} checked={checked} />
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-sm font-medium">{svc.name}</span>
+        <span className="text-xs text-subtle-foreground">{priceText(svc)}</span>
+        {disabledReason && <span className="text-xs text-tone-warning-foreground">{disabledReason}</span>}
+      </span>
+    </label>
+  );
+}
+
+function Indicator({ type, checked }: { type: "radio" | "checkbox"; checked: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "mt-0.5 flex size-4 shrink-0 items-center justify-center border border-border-strong transition-colors",
+        type === "radio" ? "rounded-full" : "rounded",
+        checked && "border-primary bg-primary text-primary-foreground",
+      )}
+    >
+      {checked && (type === "radio" ? <span className="size-1.5 rounded-full bg-current" /> : <CheckIcon className="size-3" />)}
+    </span>
+  );
 }
 
 function StepHeading({ title, description }: { title: string; description: string }) {

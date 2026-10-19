@@ -7,6 +7,7 @@ import {
   INTERVAL_UNIT_META,
   PAYMENT_STATUS_META,
   PERIODICITY_META,
+  VARIABLE_BASIS_META,
 } from "@/lib/domain";
 import type { SheetRows } from "@/lib/excel/workbook";
 import type { ImportContext } from "@/lib/excel/validate";
@@ -76,8 +77,10 @@ export async function exportRows(
       categoria: c.category_slug,
       servicio: c.catalog_name,
       nombre_plan: c.name,
+      proyecto: c.project,
       descripcion: c.description,
       precio: units(c.amount_cents),
+      tarifa_catalogo: units(c.list_price_cents),
       impuesto_pct: c.tax_rate,
       moneda: c.currency,
       tipo_cobro: BILLING_TYPE_META[c.billing_type].excel,
@@ -87,6 +90,8 @@ export async function exportRows(
       fecha_inicio: c.start_date,
       fecha_fin: c.end_date,
       proxima_renovacion: c.next_renewal_date,
+      variable_pct: c.variable_rate,
+      variable_base: c.variable_basis ? VARIABLE_BASIS_META[c.variable_basis].excel : null,
       estado: CONTRACT_STATUS_META[c.status].excel,
       responsable: c.owner_id ? ownerEmail.get(c.owner_id) : null,
       notas: c.notes,
@@ -145,10 +150,17 @@ export async function exportRows(
 export async function importContext(supabase: ServerSupabase): Promise<ImportContext> {
   const [categories, catalog, members, clients, contracts, payments] = await Promise.all([
     fetchAll((f, t) => supabase.from("service_categories").select("id, slug, name").order("id").range(f, t), "las categorías"),
-    fetchAll((f, t) => supabase.from("service_catalog").select("id, category_id, name").order("id").range(f, t), "el catálogo"),
+    fetchAll(
+      (f, t) =>
+        supabase.from("service_catalog").select("id, key, category_id, name, exclusive_group, requires_any, excludes").order("id").range(f, t),
+      "el catálogo",
+    ),
     fetchAll((f, t) => supabase.from("profiles").select("id, email, full_name").eq("is_active", true).order("id").range(f, t), "los miembros"),
     fetchAll((f, t) => supabase.from("clients").select("code, email, trade_name").order("code").range(f, t), "los clientes"),
-    fetchAll((f, t) => supabase.from("client_services_view").select("code, client_code").order("code").range(f, t), "las contrataciones"),
+    fetchAll(
+      (f, t) => supabase.from("client_services_view").select("code, client_code, service_id, project, status").order("code").range(f, t),
+      "las contrataciones",
+    ),
     fetchAll((f, t) => supabase.from("payments_view").select("code, client_code").order("code").range(f, t), "los cobros"),
   ]);
   return {

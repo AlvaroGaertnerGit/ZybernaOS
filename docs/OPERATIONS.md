@@ -47,3 +47,23 @@ Un rollback de código **no revierte las migraciones SQL**.
 ## Mantenimiento del subdominio
 
 `os.alvarogaertner.com` es un Custom Domain del Worker (`routes` en `wrangler.jsonc`). Para cambiarlo: actualiza `routes`, `SITE_URL` y las URLs de Supabase Auth (*Site URL* y *Redirect URLs*). El certificado TLS lo renueva Cloudflare automáticamente.
+
+## Comprobaciones manuales pendientes (catálogo comercial, 19/10/2026)
+
+Verificado ya en producción el 19/10/2026 (escritorio, sesión de un socio): alta guiada con planes alternativos y dependencias, precio personalizado con indicador de descuento, resumen económico por periodicidad, aviso y bloqueo en contratación individual, componente variable pendiente sin cobro automático, dashboard, rechazo de una petición manipulada por la BD y protección de la tarifa guardada. Los datos de prueba se eliminaron.
+
+Pendiente (hacerlo con un cliente de prueba `E2E-…` y archivarlo o pedir su borrado al terminar):
+
+**Versión móvil** (no se pudo reducir la ventana del navegador automatizado). En un móvil real o con las herramientas de desarrollo (≈390 px de ancho):
+1. *Clientes → Nuevo*: paso «Servicios» sin desplazamiento horizontal; las tarjetas de planes SEO se ven como opciones (círculo) con «Ninguno»; la puesta en marcha aparece bloqueada con el motivo hasta elegir un plan.
+2. Paso «Precios»: los campos de precio, moneda, impuesto y periodicidad no se solapan; el indicador «Precio personalizado» y el botón «Aplicar tarifa» caben.
+3. El diálogo de confirmación al quitar un plan con puesta en marcha se lee completo y sus botones son pulsables.
+4. *Contrataciones → ficha*: panel «Componente variable» y diálogo «Registrar periodo» usables.
+5. *Servicios → editar*: el diálogo con modalidades y «Reglas de combinación» se desplaza correctamente.
+
+**Importación / exportación Excel en producción** (la validación está cubierta por tests unitarios y la transacción por `supabase/tests/catalog_rules.sql`, pero no se ha probado el flujo completo en producción):
+1. *Importar / Exportar → Descargar plantilla*: la hoja CONTRATACIONES incluye `proyecto`, `tarifa_catalogo`, `variable_pct` y `variable_base`, y CATALOGOS la lista `bases_variable`.
+2. Importar un libro con un cliente de prueba y dos filas de planes SEO para el mismo cliente → la previsualización muestra el error en la fila y columna `servicio`, y no se guarda nada.
+3. Corregir a un plan + «Puesta en marcha SEO» (+ opcional `variable_pct` 8 / `variable_base` beneficios) → importa; la contratación muestra la tarifa al contratar.
+4. *Exportar todo* → la exportación incluye `proyecto`, `tarifa_catalogo` y el variable; reimportarla en modo «Omitir» no crea duplicados.
+5. Archivar el cliente de prueba (o pedir su borrado por SQL).

@@ -26,6 +26,27 @@ export type CatalogStatus = (typeof CATALOG_STATUSES)[number];
 
 export const CURRENCIES = ["EUR", "USD", "GBP"] as const;
 
+/** Base de cálculo del componente variable. Son magnitudes distintas: no se mezclan. */
+export const VARIABLE_BASES = ["profit", "revenue", "billing"] as const;
+export type VariableBasis = (typeof VARIABLE_BASES)[number];
+
+export const VARIABLE_BASIS_META: Record<VariableBasis, { label: string; of: string; excel: string }> = {
+  profit: { label: "Beneficios", of: "de los beneficios", excel: "beneficios" },
+  revenue: { label: "Ingresos", of: "de los ingresos", excel: "ingresos" },
+  billing: { label: "Facturación", of: "de la facturación", excel: "facturacion" },
+};
+
+/** Estados en los que una contratación cuenta para las reglas de combinación. */
+export const LIVE_CONTRACT_STATUSES = ["draft", "active", "paused"] as const;
+
+/** Periodicidades que admite una tarifa del catálogo (la personalizada es solo por contrato). */
+export const CATALOG_PERIODICITIES = ["monthly", "quarterly", "semiannual", "annual"] as const;
+
+/** Clave de una modalidad de precio: pago único o recurrente con su periodicidad. */
+export function modalityKey(m: { billing_type: string; periodicity?: string | null }): string {
+  return m.billing_type === "one_time" ? "one_time" : `recurring:${m.periodicity ?? ""}`;
+}
+
 /** Tono visual de cada estado (mapeado a tokens en StatusBadge). */
 export type Tone = "neutral" | "info" | "success" | "warning" | "danger" | "muted";
 

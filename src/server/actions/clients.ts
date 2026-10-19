@@ -9,7 +9,7 @@ import type { Database } from "@/types/database";
 
 type ClientInsert = Database["public"]["Tables"]["clients"]["Insert"];
 import { dbErrorMessage, memberAction } from "./_helpers";
-import { contractRow } from "./contracts-core";
+import { checkSelectionRules, contractRow } from "./contracts-core";
 
 function revalidateClients(id?: string) {
   revalidatePath("/clientes");
@@ -40,6 +40,8 @@ const wizardSchema = z.object({
 /** Alta guiada: cliente + contrataciones + prestaciones en una única transacción. */
 export async function createClientWithContractsAction(input: unknown): Promise<ActionResult<{ id: string }>> {
   return memberAction(wizardSchema, input, async ({ client, contracts }, { supabase }) => {
+    const ruleError = await checkSelectionRules(supabase, contracts);
+    if (ruleError) return { ok: false, error: ruleError };
     const { data, error } = await supabase.rpc("create_client_with_contracts", {
       p_client: client,
       p_contracts: contracts.map((c) => ({ values: contractRow({ ...c, code: null }), deliverables: c.deliverables })),

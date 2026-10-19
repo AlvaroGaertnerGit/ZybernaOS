@@ -70,6 +70,14 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
         />
         <Kpi label="Servicios activos" value={String(d.kpis.activeContracts)} href="/contrataciones?status=active" />
       </section>
+      {(d.variable.determinedCount > 0 || d.variable.pendingCount > 0) && (
+        <p className="tabular -mt-3 text-xs text-muted-foreground" data-testid="variable-summary">
+          Componente variable de {periodName}: {formatMoney(d.variable.determined)} determinado ({d.variable.determinedCount} periodo
+          {d.variable.determinedCount === 1 ? "" : "s"}, {formatMoney(d.variable.billed)} con cobro previsto)
+          {d.variable.pendingCount > 0 && ` · ${d.variable.pendingCount} pendiente${d.variable.pendingCount === 1 ? "" : "s"} de determinar`}. No
+          computa en MRR; cuenta como cobrado al registrar el pago.
+        </p>
+      )}
 
       <div className="grid gap-6 xl:grid-cols-3">
         <Panel className="xl:col-span-2">

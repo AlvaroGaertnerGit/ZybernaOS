@@ -76,6 +76,17 @@ export function centsToInputString(cents: Cents | null | undefined): string {
   return `${sign}${units}.${dec}`;
 }
 
+/** Céntimos → texto para un campo de formulario en formato español ("1234,50", "-80,00"); null → "". */
+export function centsToField(cents: Cents | null | undefined): string {
+  if (cents === null || cents === undefined) return "";
+  return centsToInputString(cents).replace(".", ",");
+}
+
+/** Porcentaje para mostrar o editar con coma decimal (8.5 → "8,5"). */
+export function formatPercent(rate: number): string {
+  return String(rate).replace(".", ",");
+}
+
 /** Céntimos → número en unidades (solo para presentación / Excel). */
 export function centsToUnits(cents: Cents): number {
   return cents / 100;

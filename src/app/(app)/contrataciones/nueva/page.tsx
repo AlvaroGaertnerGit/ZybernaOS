@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { z } from "zod";
 import { requireMember } from "@/server/auth";
 import { clientOptions } from "@/server/queries/clients";
+import { liveContracts } from "@/server/queries/contracts";
 import { getAgencySettings, getCategories, getMembers, param } from "@/server/queries/common";
 import { getCatalog } from "@/server/queries/catalog";
 import { PageHeader } from "@/components/layout/page-header";
@@ -16,12 +17,13 @@ export default async function NewContractPage({ searchParams }: PageProps<"/cont
   const clientParam = param(sp, "cliente");
   const clientId = clientParam && z.uuid().safeParse(clientParam).success ? clientParam : "";
 
-  const [clients, categories, catalog, members, settings] = await Promise.all([
+  const [clients, categories, catalog, members, settings, live] = await Promise.all([
     clientOptions(),
     getCategories(),
     getCatalog({ includeInactive: false }),
     getMembers(),
     getAgencySettings(),
+    liveContracts(clientId || undefined),
   ]);
   const client = clients.find((c) => c.id === clientId);
   const other = categories.find((c) => c.slug === "other")?.id ?? categories[0]?.id ?? "";
@@ -43,13 +45,14 @@ export default async function NewContractPage({ searchParams }: PageProps<"/cont
               ]
             : [{ href: "/contrataciones", label: "Contrataciones" }]
         }
-        description="Parte de una plantilla del catálogo o crea un servicio a medida. Precio, condiciones y prestaciones son libres."
+        description="Elige un servicio del catálogo para cargar su tarifa y prestaciones, o crea uno a medida. Puedes ajustar el precio y las prestaciones para este cliente sin cambiar el catálogo."
       />
       <ContractForm
         clients={clients}
         categories={categories}
         catalog={catalog}
         members={members}
+        liveContracts={live}
         lockClient={Boolean(client)}
         defaultValues={{ ...defaults, code: "", client_id: client?.id ?? "" }}
       />

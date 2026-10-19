@@ -15,6 +15,8 @@ Hojas: `INSTRUCCIONES`, `CLIENTES`, `CONTRATACIONES`, `PRESTACIONES`, `COBROS`, 
 
 Columnas añadidas respecto a la propuesta inicial, porque el modelo las necesita: `impuesto_pct`, `intervalo_cada`, `intervalo_unidad` y `responsable` en CONTRATACIONES, e `impuesto_pct` y `moneda` en COBROS.
 
+Catálogo comercial (19/10/2026), todas opcionales para que los libros anteriores sigan siendo válidos: `proyecto`, `variable_pct` y `variable_base` (beneficios, ingresos o facturacion) en CONTRATACIONES, y `tarifa_catalogo` (solo exportación, se ignora al importar). `servicio` admite el nombre o el identificador estable del catálogo (p. ej. `seo_local`). La modalidad es `tipo_cobro` + `periodicidad`; el precio de la fila es el **acordado**. Las prestaciones siguen en PRESTACIONES.
+
 ## Relaciones
 
 `codigo_cliente` → CLIENTES; `codigo_contratacion` → CONTRATACIONES. Se pueden referenciar registros que ya existan en la aplicación. Los códigos (`CLI-0001`, `CON-0001`, `COB-00001`) se generan automáticamente en la aplicación y se exportan, de modo que cualquier exportación conserva las relaciones.
@@ -38,6 +40,7 @@ Reglas destacadas:
 - Una contratación o cobro existente no puede cambiar de cliente mediante importación.
 - COBROS: el estado se deriva de los importes; `anulado` se aplica tal cual; `cobrado` sin importe → se registra el total; el importe cobrado genera un movimiento en `payment_transactions`. En modo actualización, la diferencia con lo ya cobrado se registra como movimiento de pago o de ajuste.
 - PRESTACIONES: se sustituyen solo para contrataciones creadas o actualizadas en ese lote.
+- **Reglas del catálogo**: las mismas que en los formularios (planes alternativos, incompatibilidades y dependencias por cliente y proyecto), teniendo en cuenta las contrataciones vivas que ya existen. Cada error indica la fila de CONTRATACIONES y el código con el que choca; la BD lo vuelve a comprobar dentro de la transacción.
 
 ## Exportación
 

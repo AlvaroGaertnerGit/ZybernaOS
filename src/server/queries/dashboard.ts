@@ -16,6 +16,14 @@ interface DashboardSummary {
   categories: { category: string; count: number; mrr: Cents }[];
 }
 
+/** Respuesta de la RPC `variable_summary` (periodos variables que empiezan en el periodo). */
+interface VariableSummary {
+  determined: Cents;
+  determinedCount: number;
+  pendingCount: number;
+  billed: Cents;
+}
+
 export async function getDashboard(month?: IsoDate) {
   const supabase = await db();
   const today = todayIso();
@@ -25,7 +33,7 @@ export async function getDashboard(month?: IsoDate) {
   const horizon = addDays(today, 30);
 
   // Cifras agregadas en SQL: exactas con cualquier volumen (la API limita cada respuesta a 1.000 filas).
-  const [activeClients, summary, upcoming, overdue, renewals, recentClients, activity, members] =
+  const [activeClients, summary, upcoming, overdue, renewals, recentClients, activity, members, variable] =
     await Promise.all([
       supabase.from("clients").select("id", { count: "exact", head: true }).eq("status", "active").is("archived_at", null),
       supabase.rpc("dashboard_summary", {
@@ -64,6 +72,7 @@ export async function getDashboard(month?: IsoDate) {
         .limit(5),
       supabase.from("activity_log").select("*").order("created_at", { ascending: false }).limit(8),
       getMembers(),
+      supabase.rpc("variable_summary", { p_period_start: periodStart, p_period_end: periodEnd }),
     ]);
 
   const sum = unwrap(summary, "las métricas") as unknown as DashboardSummary;
@@ -82,6 +91,8 @@ export async function getDashboard(month?: IsoDate) {
       expectedInPeriod: sum.expectedInPeriod,
       pending,
     },
+    // El variable no es MRR ni ingreso confirmado: solo se informa (determinado / pendiente).
+    variable: unwrap(variable, "el componente variable") as unknown as VariableSummary,
     series: sum.series,
     mrrByCategory: sum.categories
       .filter((c) => c.mrr > 0)

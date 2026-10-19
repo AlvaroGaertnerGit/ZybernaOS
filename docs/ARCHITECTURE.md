@@ -67,3 +67,14 @@ tests/unit · tests/e2e
 | Pendiente | Importe previsto − cobrado de cobros no anulados (vencido / por vencer) | |
 
 Los pagos únicos no computan en MRR. El impuesto nunca se aplica automáticamente.
+
+**Componente variable** (p. ej. % de beneficios): no forma parte del MRR ni de lo cobrado hasta que se crea su cobro previsto (a petición) y se registra el pago. El dashboard muestra aparte lo determinado y lo pendiente del mes (`variable_summary`). Beneficios, ingresos y facturación son bases distintas y se guardan como tales.
+
+**Resumen económico** (`src/lib/calculations/summary.ts`): agrupa por periodicidad (pago único, mensual, trimestral…) sin sumar importes de periodicidades distintas; muestra descuento/suplemento frente a la tarifa del catálogo e impuestos solo si se han indicado.
+
+## Catálogo y contratación
+
+- El catálogo es la fuente de las tarifas: al elegir un servicio se cargan precio, periodicidad/modalidad y prestaciones; todo es editable para ese cliente sin tocar el catálogo.
+- Al guardar, la BD copia la tarifa de referencia (`list_price_cents`, `catalog_snapshot`); cambiar el catálogo después no altera contratos.
+- En el alta guiada, los servicios de un mismo grupo de alternativas se eligen como opciones (radio con «Ninguno»); los demás son casillas. Elegir una alternativa sustituye a la anterior; si se pierden personalizaciones o se rompe una dependencia, se pide confirmación.
+- Reglas: ver [DATABASE.md](DATABASE.md#reglas-de-combinación-del-catálogo).

@@ -11,6 +11,7 @@ import {
   INTERVAL_UNIT_META,
   PAYMENT_STATUS_META,
   PERIODICITY_META,
+  VARIABLE_BASIS_META,
   fromExcelValue,
   normalizeToken,
   type BillingType,
@@ -18,7 +19,9 @@ import {
   type ContractStatus,
   type IntervalUnit,
   type Periodicity,
+  type VariableBasis,
 } from "@/lib/domain";
+import { findViolations, isLiveStatus, shouldCheckRequires, type RuleItem, type RuleService } from "@/lib/catalog/rules";
 import { parseMoneyToCents } from "@/lib/calculations/money";
 import { parseFlexibleDate, todayIso } from "@/lib/calculations/dates";
 import { EXAMPLE_PREFIX, SHEETS, type SheetKey } from "./schema";
@@ -33,10 +36,10 @@ export interface ImportIssue {
 
 export interface ImportContext {
   categories: { id: string; slug: string; name: string }[];
-  catalog: { id: string; category_id: string; name: string }[];
+  catalog: (RuleService & { category_id: string })[];
   members: { id: string; email: string; full_name: string }[];
   existingClients: { code: string; email: string | null; trade_name: string }[];
-  existingContracts: { code: string; client_code: string }[];
+  existingContracts: { code: string; client_code: string; service_id?: string | null; project?: string | null; status?: string | null }[];
   existingPayments: { code: string; client_code: string }[];
   today?: string;
 }
@@ -119,14 +122,14 @@ export function validateWorkbook(
     if (cents === null) err(sheet, row, column, `Importe no válido «${text(raw)}». Usa números con hasta 2 decimales.`);
     return cents;
   };
-  const percent = (sheet: SheetKey, row: number, raw: RawValue | undefined): number | null => {
+  const percent = (sheet: SheetKey, row: number, raw: RawValue | undefined, column = "impuesto_pct"): number | null => {
     const v = text(raw);
     if (!v) return null;
     const n = typeof raw === "number" ? raw : Number(v.replace("%", "").replace(",", "."));
     // Si Excel guarda 21 % como 0,21, se interpreta como porcentaje.
     const pct = typeof raw === "number" && raw > 0 && raw < 1 ? Math.round(raw * 10000) / 100 : n;
     if (!Number.isFinite(pct) || pct < 0 || pct > 100 || Math.abs(pct * 100 - Math.round(pct * 100)) > 1e-6) {
-      err(sheet, row, "impuesto_pct", `Porcentaje no válido «${v}».`);
+      err(sheet, row, column, `Porcentaje no válido «${v}».`);
       return null;
     }
     return Math.round(pct * 100) / 100;
@@ -224,6 +227,8 @@ export function validateWorkbook(
     categoryBy.set(normalizeToken(cat.name), cat);
   }
   const fileContracts = new Map<string, string>(); // code → client code
+  // Contrataciones del archivo que se escribirán, para validar las reglas del catálogo.
+  const ruleRows: (RuleItem & { row: number; code: string; client: string; changedService: boolean })[] = [];
   for (const { row, values: v } of sheets.contracts ?? []) {
     const s: SheetKey = "contracts";
     const c = code(s, row, "codigo_contratacion", v.codigo_contratacion, true);
@@ -245,11 +250,25 @@ export function validateWorkbook(
 
     const serviceName = text(v.servicio, 120);
     let serviceId: string | null = null;
-    if (serviceName && category) {
-      const svc = ctx.catalog.find((x) => x.category_id === category.id && normalizeToken(x.name) === normalizeToken(serviceName));
+    if (serviceName) {
+      // Por identificador estable (key) o por nombre dentro de la categoría.
+      const svc =
+        ctx.catalog.find((x) => x.key === serviceName.trim().toLowerCase()) ??
+        (category ? ctx.catalog.find((x) => x.category_id === category.id && normalizeToken(x.name) === normalizeToken(serviceName)) : undefined);
       if (svc) serviceId = svc.id;
       else warn(s, row, "servicio", `El servicio «${serviceName}» no está en el catálogo; se guardará sin vincular.`);
     }
+    const project = text(v.proyecto, 120);
+    const variableRate = percent(s, row, v.variable_pct, "variable_pct");
+    if (variableRate === 0) err(s, row, "variable_pct", "El porcentaje variable debe ser mayor que 0.");
+    const rawBasis = text(v.variable_base);
+    let variableBasis: VariableBasis | null = null;
+    if (rawBasis) {
+      variableBasis = fromExcelValue(VARIABLE_BASIS_META, rawBasis);
+      if (!variableBasis) err(s, row, "variable_base", `Base no válida «${rawBasis}». Usa beneficios, ingresos o facturacion.`);
+    }
+    if (variableRate && !rawBasis) err(s, row, "variable_base", "Indica la base del componente variable (beneficios, ingresos o facturacion).");
+    if (rawBasis && !variableRate) err(s, row, "variable_pct", "Indica el porcentaje del componente variable.");
     const name = text(v.nombre_plan, 160) ?? serviceName;
     if (!name) err(s, row, "nombre_plan", "El nombre de la contratación es obligatorio.");
     const amount = money(s, row, "precio", v.precio, true);
@@ -303,6 +322,18 @@ export function validateWorkbook(
     if (exists) plan.contracts.existing++;
     else plan.contracts.create++;
     preview.contracts.push({ row, code: c, client: clientCode, name: name ?? "", existing: exists });
+    if (!exists || mode === "update") {
+      const previous = existingContract.get(c);
+      ruleRows.push({
+        row,
+        code: c,
+        client: clientCode,
+        service_id: serviceId,
+        project,
+        status,
+        changedService: shouldCheckRequires(previous ? { service_id: previous.service_id ?? null, status: previous.status } : null, serviceId),
+      });
+    }
     payload.contracts.push({
       code: c,
       client_code: clientCode,
@@ -323,9 +354,42 @@ export function validateWorkbook(
       status,
       owner_id: owner,
       notes: text(v.notas, 5000),
+      project,
+      variable_rate: variableRate && variableBasis ? variableRate : null,
+      variable_basis: variableRate && variableBasis ? variableBasis : null,
     });
   }
   const contractClient = (c: string) => fileContracts.get(c) ?? existingContract.get(c)?.client_code;
+
+  // Reglas del catálogo (alternativas, incompatibles, dependencias) por cliente y proyecto,
+  // sobre las contrataciones vivas resultantes: las existentes que no se reescriben + las del archivo.
+  // Agrupado por cliente en una sola pasada (la validación definitiva corre en el Worker).
+  type RuleRow = (typeof ruleRows)[number];
+  const fileByClient = new Map<string, RuleRow[]>();
+  for (const r of ruleRows) fileByClient.set(r.client, [...(fileByClient.get(r.client) ?? []), r]);
+  const written = new Set(ruleRows.map((r) => r.code));
+  const keptByClient = new Map<string, RuleRow[]>();
+  for (const e of ctx.existingContracts) {
+    if (!fileByClient.has(e.client_code) || written.has(e.code) || !e.service_id || !isLiveStatus(e.status ?? "active")) continue;
+    const item = { code: e.code, service_id: e.service_id, project: e.project, status: e.status, row: 0, client: e.client_code, changedService: false };
+    keptByClient.set(e.client_code, [...(keptByClient.get(e.client_code) ?? []), item]);
+  }
+  for (const [clientCode, fileItems] of fileByClient) {
+    const kept = keptByClient.get(clientCode) ?? [];
+    const items = [...kept, ...fileItems];
+    const fromFile = (i: number) => i >= kept.length;
+    for (const v of findViolations(items, ctx.catalog, {
+      checkPair: (a, b) => fromFile(a) || fromFile(b),
+      checkRequires: (i) => fromFile(i) && items[i].changedService,
+    })) {
+      if (v.kind === "requires") {
+        err("contracts", items[v.index].row, "servicio", v.message);
+        continue;
+      }
+      const [mine, theirs] = fromFile(v.index) ? [v.index, v.other] : [v.other, v.index];
+      err("contracts", items[mine].row, "servicio", `${v.message} Conflicto con ${items[theirs].code}.`);
+    }
+  }
 
   // ------------------------------------------------------------ PRESTACIONES
   const positions = new Map<string, number>();

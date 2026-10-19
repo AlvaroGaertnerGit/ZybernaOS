@@ -1,6 +1,6 @@
 import "server-only";
 
-import { BILLING_TYPES, CONTRACT_STATUSES, type BillingType, type ContractStatus } from "@/lib/domain";
+import { BILLING_TYPES, CONTRACT_STATUSES, LIVE_CONTRACT_STATUSES, type BillingType, type ContractStatus } from "@/lib/domain";
 import type { ContractsViewRow } from "@/types/database";
 import { fetchAll } from "@/lib/fetch-all";
 import { db, PAGE_SIZE, searchTerm, unwrap, type Paginated } from "./common";
@@ -51,6 +51,36 @@ export async function getContract(id: string) {
     deliverables: unwrap(deliverables, "las prestaciones"),
     payments: unwrap(payments, "los cobros"),
   };
+}
+
+/** Contrataciones vivas (para validar reglas de combinación en el formulario). */
+export async function liveContracts(clientId?: string) {
+  const supabase = await db();
+  return fetchAll((from, to) => {
+    let query = supabase
+      .from("client_services")
+      .select("id, code, name, client_id, service_id, project, status")
+      .in("status", [...LIVE_CONTRACT_STATUSES])
+      .not("service_id", "is", null)
+      .order("id");
+    if (clientId) query = query.eq("client_id", clientId);
+    return query.range(from, to);
+  }, "las contrataciones vivas");
+}
+
+export async function getVariablePeriods(contractId: string) {
+  const supabase = await db();
+  return fetchAll(
+    (f, t) =>
+      supabase
+        .from("contract_variable_periods")
+        .select("*")
+        .eq("client_service_id", contractId)
+        .order("period_start", { ascending: false })
+        .order("id")
+        .range(f, t),
+    "los periodos variables",
+  );
 }
 
 export async function contractOptions(clientId?: string) {

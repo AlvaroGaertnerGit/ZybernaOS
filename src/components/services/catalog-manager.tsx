@@ -6,6 +6,7 @@ import { BILLING_TYPE_META, PERIODICITY_META } from "@/lib/domain";
 import { formatMoney } from "@/lib/calculations/money";
 import { deleteCatalogServiceAction, saveCategoryAction } from "@/server/actions/catalog";
 import { cn } from "@/lib/utils";
+import { requirementLabel } from "@/lib/catalog/rules";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -85,13 +86,37 @@ export function CatalogManager({
                           {s.name}
                         </button>
                         {s.status === "inactive" && <StatusBadge tone="muted">Inactivo</StatusBadge>}
+                        {s.exclusive_group && (
+                          <StatusBadge tone="info" dot={false} title="Alternativas: solo uno del grupo por cliente y proyecto">
+                            Alternativa · {s.exclusive_group}
+                          </StatusBadge>
+                        )}
+                        {s.requires_any.length > 0 && (
+                          <StatusBadge tone="warning" dot={false}>
+                            Requiere {requirementLabel(s, services)}
+                          </StatusBadge>
+                        )}
+                        {s.excludes.length > 0 && (
+                          <StatusBadge tone="neutral" dot={false}>
+                            Incompatible con {s.excludes.map((k) => services.find((x) => x.key === k)?.name ?? k).join(", ")}
+                          </StatusBadge>
+                        )}
                       </div>
                       {s.description && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{s.description}</p>}
                       <p className="mt-1 text-xs text-subtle-foreground">
                         {s.suggested_billing_type === "one_time"
                           ? BILLING_TYPE_META.one_time.label
                           : PERIODICITY_META[s.suggested_periodicity ?? "monthly"].label}
-                        {s.default_price_cents != null && ` · ${formatMoney(s.default_price_cents, s.currency)}`}
+                        {s.default_price_cents != null ? ` · ${formatMoney(s.default_price_cents, s.currency)}` : " · precio a medida"}
+                        {s.modalities.length > 0 &&
+                          ` · también ${s.modalities
+                            .map(
+                              (m) =>
+                                `${m.billing_type === "one_time" ? "pago único" : PERIODICITY_META[m.periodicity ?? "monthly"].label.toLowerCase()}${
+                                  m.price_cents != null ? ` ${formatMoney(m.price_cents, s.currency)}` : ""
+                                }`,
+                            )
+                            .join(", ")}`}
                         {` · ${s.deliverables.length} prestaciones`}
                         {usage[s.id] ? ` · ${usage[s.id]} contratación(es)` : ""}
                       </p>
@@ -123,6 +148,7 @@ export function CatalogManager({
         open={editing !== null}
         onOpenChange={(o) => !o && setEditing(null)}
         service={editing?.service ?? null}
+        catalog={services}
         defaultCategoryId={editing?.categoryId}
         categories={categories}
       />

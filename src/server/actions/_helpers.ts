@@ -22,7 +22,9 @@ export function dbErrorMessage(error: PgError): string {
     case "42501":
       return "No tienes permiso para realizar esta operación.";
     case "P0001":
-      return error.message;
+      // Las reglas del catálogo empiezan por el código de la contratación («CON-0004: …»),
+      // útil en importaciones pero no en un formulario donde aún no tiene código visible.
+      return error.message.replace(/^[A-Z]{2,5}-\d+: /, "");
     default:
       return "No se pudo guardar. Inténtalo de nuevo.";
   }

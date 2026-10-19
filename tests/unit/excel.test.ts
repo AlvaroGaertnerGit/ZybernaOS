@@ -13,7 +13,7 @@ const categories = [
 ];
 const baseCtx: ImportContext = {
   categories,
-  catalog: [{ id: "svc-seo", category_id: "c-seo", name: "SEO mensual" }],
+  catalog: [{ id: "svc-seo", key: "seo_mensual", category_id: "c-seo", name: "SEO mensual", exclusive_group: null, requires_any: [], excludes: [] }],
   members: [{ id: "m-1", email: "socio1@zyberna.test", full_name: "Socio Uno" }],
   existingClients: [],
   existingContracts: [],

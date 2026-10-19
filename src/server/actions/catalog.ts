@@ -17,19 +17,20 @@ export async function saveCatalogServiceAction(id: string | null, input: unknown
     z.object({ id: uuid.nullable(), values: catalogServiceSchema }),
     { id, values: input },
     async ({ id, values }, { supabase }) => {
-      const { deliverables, default_price, ...rest } = values;
-      const row = { ...rest, default_price_cents: default_price };
-      const res = id
-        ? await supabase.from("service_catalog").update(row).eq("id", id).select("id").single()
-        : await supabase.from("service_catalog").insert(row).select("id").single();
-      if (res.error) return { ok: false, error: dbErrorMessage(res.error) };
-      const { error } = await supabase.rpc("replace_catalog_deliverables", {
-        p_service_id: res.data.id,
-        p_items: deliverables,
+      // Servicio, prestaciones y modalidades en una única transacción. La key (identificador
+      // estable de las reglas) la genera la base de datos al crear y no cambia después.
+      const { deliverables, modalities, default_price, ...rest } = values;
+      const { data, error } = await supabase.rpc("save_catalog_service", {
+        p_id: id,
+        p_values: { ...rest, default_price_cents: default_price },
+        p_deliverables: deliverables,
+        p_modalities: modalities,
       });
       if (error) return { ok: false, error: dbErrorMessage(error) };
       revalidateCatalog();
-      return { ok: true, data: { id: res.data.id }, message: id ? "Servicio actualizado." : "Servicio creado." };
+      revalidatePath("/clientes/nuevo");
+      revalidatePath("/contrataciones/nueva");
+      return { ok: true, data: { id: data as string }, message: id ? "Servicio actualizado." : "Servicio creado." };
     },
   );
 }

@@ -5,7 +5,10 @@ import {
   CLIENT_STATUSES,
   CONTRACT_STATUSES,
   INTERVAL_UNITS,
+  CATALOG_PERIODICITIES,
   PERIODICITIES,
+  VARIABLE_BASES,
+  modalityKey,
 } from "@/lib/domain";
 import {
   currency,
@@ -15,6 +18,8 @@ import {
   optionalEmail,
   optionalIsoDate,
   optionalMoneyCents,
+  optionalPercent,
+  optionalSignedMoneyCents,
   optionalTaxRate,
   optionalText,
   optionalUrl,
@@ -94,8 +99,25 @@ const contractBase = z.object({
   status: z.enum(CONTRACT_STATUSES),
   owner_id: optionalUuid,
   notes: optionalText(5000),
+  // Opcionales (también para peticiones de formularios anteriores que no los envían).
+  project: optionalText(120).default(null),
+  variable_rate: optionalPercent("Porcentaje variable").default(null),
+  variable_basis: z
+    .union([z.enum(VARIABLE_BASES), z.literal("")])
+    .transform((v) => (v === "" ? null : v))
+    .default(null),
   deliverables: deliverablesSchema,
 });
+
+/** Componente variable: porcentaje y base van juntos (o ninguno). */
+function refineVariable(v: { variable_rate: number | null; variable_basis: string | null }, ctx: z.RefinementCtx) {
+  if (v.variable_rate !== null && !v.variable_basis) {
+    ctx.addIssue({ code: "custom", path: ["variable_basis"], message: "Indica sobre qué se calcula el porcentaje" });
+  }
+  if (v.variable_rate === null && v.variable_basis) {
+    ctx.addIssue({ code: "custom", path: ["variable_rate"], message: "Indica el porcentaje variable" });
+  }
+}
 
 export const contractSchema = contractBase.transform((v, ctx) => {
   if (v.billing_type === "one_time") {
@@ -116,12 +138,15 @@ export const contractSchema = contractBase.transform((v, ctx) => {
   if (v.end_date && v.end_date < v.start_date) {
     ctx.addIssue({ code: "custom", path: ["end_date"], message: "La finalización no puede ser anterior al inicio" });
   }
+  refineVariable(v, ctx);
 });
 export type ContractFormValues = z.input<typeof contractSchema>;
 export type ContractInput = z.output<typeof contractSchema>;
 
 /** Contratación dentro del asistente de alta (sin client_id todavía). */
-export const wizardContractSchema = contractBase.omit({ client_id: true, code: true });
+export const wizardContractSchema = contractBase
+  .omit({ client_id: true, code: true })
+  .superRefine((v, ctx) => refineVariable(v, ctx));
 export type WizardContractValues = z.input<typeof wizardContractSchema>;
 
 // ---------------------------------------------------------------------------
@@ -155,9 +180,36 @@ export const generatePaymentsSchema = z.object({
   until: isoDate("Hasta"),
 });
 
+export const variablePeriodSchema = z
+  .object({
+    contract_id: uuid,
+    period_start: isoDate("Inicio del periodo"),
+    period_end: isoDate("Fin del periodo"),
+    base_amount: optionalSignedMoneyCents("Importe de la base"),
+    notes: optionalText(2000),
+  })
+  .refine((v) => v.period_end >= v.period_start, { path: ["period_end"], message: "El fin no puede ser anterior al inicio" });
+export type VariablePeriodFormValues = z.input<typeof variablePeriodSchema>;
+
 // ---------------------------------------------------------------------------
 // Catálogo
 // ---------------------------------------------------------------------------
+const ruleRef = z.string().trim().regex(/^(group:)?[a-z0-9_]{1,40}$/, "Referencia de regla no válida");
+const modalitySchema = z
+  .object({
+    billing_type: z.enum(BILLING_TYPES),
+    periodicity: z.union([z.enum(CATALOG_PERIODICITIES), z.literal("")]).transform((v) => (v === "" ? null : v)),
+    price: optionalMoneyCents("Precio de la modalidad"),
+  })
+  .transform((v, ctx) => {
+    if (v.billing_type === "one_time") return { billing_type: v.billing_type, periodicity: null, price_cents: v.price };
+    if (!v.periodicity) {
+      ctx.addIssue({ code: "custom", path: ["periodicity"], message: "Elige la periodicidad" });
+      return z.NEVER;
+    }
+    return { billing_type: v.billing_type, periodicity: v.periodicity, price_cents: v.price };
+  });
+
 export const catalogServiceSchema = z
   .object({
     category_id: uuid,
@@ -167,12 +219,29 @@ export const catalogServiceSchema = z
     currency,
     suggested_billing_type: z.enum(BILLING_TYPES),
     suggested_periodicity: z
-      .union([z.enum(["monthly", "quarterly", "semiannual", "annual"] as const), z.literal("")])
+      .union([z.enum(CATALOG_PERIODICITIES), z.literal("")])
       .transform((v) => (v === "" ? null : v)),
     status: z.enum(CATALOG_STATUSES),
     deliverables: deliverablesSchema,
+    exclusive_group: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .refine((v) => v === "" || /^[a-z0-9_]{1,40}$/.test(v), "Grupo: solo minúsculas, números y guion bajo")
+      .transform((v) => (v === "" ? null : v)),
+    requires_any: z.array(ruleRef).max(20),
+    excludes: z.array(ruleRef).max(20),
+    modalities: z.array(modalitySchema).max(10, "Máximo 10 modalidades"),
   })
   .transform((v, ctx) => {
+    // La modalidad principal es la sugerida; las adicionales no pueden repetirla ni repetirse.
+    const main = modalityKey({ billing_type: v.suggested_billing_type, periodicity: v.suggested_periodicity });
+    const keys = v.modalities.map(modalityKey);
+    keys.forEach((k, i) => {
+      if (k === main || keys.indexOf(k) !== i) {
+        ctx.addIssue({ code: "custom", path: ["modalities", i, "periodicity"], message: "Modalidad repetida" });
+      }
+    });
     if (v.suggested_billing_type === "one_time") return { ...v, suggested_periodicity: null };
     if (!v.suggested_periodicity) {
       ctx.addIssue({ code: "custom", path: ["suggested_periodicity"], message: "Elige una periodicidad sugerida" });

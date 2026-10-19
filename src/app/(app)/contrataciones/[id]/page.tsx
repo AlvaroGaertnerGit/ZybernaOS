@@ -3,8 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { PencilIcon, WalletIcon } from "lucide-react";
-import { getContract } from "@/server/queries/contracts";
-import { computeTax, formatMoney } from "@/lib/calculations/money";
+import { getContract, getVariablePeriods } from "@/server/queries/contracts";
+import { VARIABLE_BASIS_META } from "@/lib/domain";
+import { priceDeviation } from "@/lib/calculations/summary";
+import { computeTax, formatMoney, formatPercent } from "@/lib/calculations/money";
 import { periodicityLabel } from "@/lib/calculations/mrr";
 import { formatDate, todayIso } from "@/lib/calculations/dates";
 import { PageHeader } from "@/components/layout/page-header";
@@ -16,14 +18,18 @@ import { ContractStatusBadge } from "@/components/status-badges";
 import { ContractQuickActions } from "@/components/contracts/contract-quick-actions";
 import { PaymentsList } from "@/components/payments/payments-list";
 import { NewPaymentButton } from "@/components/payments/new-payment-button";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { VariablePanel } from "@/components/contracts/variable-panel";
 
 export const metadata: Metadata = { title: "Contratación" };
 
 export default async function ContractPage({ params }: PageProps<"/contrataciones/[id]">) {
   const { id } = await params;
   if (!z.uuid().safeParse(id).success) notFound();
-  const { contract, deliverables, payments } = await getContract(id);
+  const [{ contract, deliverables, payments }, variablePeriods] = await Promise.all([getContract(id), getVariablePeriods(id)]);
   if (!contract) notFound();
+  const deviation = priceDeviation(contract.amount_cents, contract.list_price_cents);
+  const snapshot = contract.catalog_snapshot as { name?: string; captured_at?: string } | null;
 
   const recurring = contract.billing_type === "recurring";
   const tax = computeTax(contract.amount_cents, contract.tax_rate);
@@ -44,6 +50,8 @@ export default async function ContractPage({ params }: PageProps<"/contratacione
             <ContractStatusBadge status={contract.status} />
             <span>{contract.code}</span>
             {contract.catalog_name && <span>· Plantilla: {contract.catalog_name}</span>}
+            {contract.project && <span>· Proyecto: {contract.project}</span>}
+            {deviation && deviation.diff !== 0 && <StatusBadge tone="info">Precio personalizado</StatusBadge>}
           </span>
         }
         actions={
@@ -63,7 +71,12 @@ export default async function ContractPage({ params }: PageProps<"/contratacione
           <Stat
             label={recurring ? "Precio por periodo" : "Precio"}
             value={formatMoney(contract.amount_cents, contract.currency)}
-            hint={recurring ? periodicityLabel(contract.periodicity, contract.interval_count, contract.interval_unit) : "Pago único"}
+            hint={
+              (recurring ? periodicityLabel(contract.periodicity, contract.interval_count, contract.interval_unit) : "Pago único") +
+              (contract.variable_rate && contract.variable_basis
+                ? ` + ${formatPercent(contract.variable_rate)} % ${VARIABLE_BASIS_META[contract.variable_basis].of}`
+                : "")
+            }
           />
           <Stat
             label="MRR"
@@ -104,6 +117,21 @@ export default async function ContractPage({ params }: PageProps<"/contratacione
               </ol>
             )}
           </Panel>
+          {contract.variable_rate !== null && contract.variable_basis !== null && (
+            <Panel>
+              <PanelHeader>
+                <PanelTitle>Componente variable</PanelTitle>
+              </PanelHeader>
+              <VariablePanel
+                contractId={id}
+                rate={contract.variable_rate}
+                basis={contract.variable_basis}
+                currency={contract.currency}
+                periods={variablePeriods}
+                today={todayIso()}
+              />
+            </Panel>
+          )}
           <Panel>
             <PanelHeader>
               <PanelTitle>Cobros</PanelTitle>
@@ -133,6 +161,28 @@ export default async function ContractPage({ params }: PageProps<"/contratacione
           <PanelContent>
             <dl className="flex flex-col gap-3 text-sm">
               <Row label="Cliente" value={<Link href={`/clientes/${contract.client_id}`} className="hover:underline">{contract.client_name}</Link>} />
+              {contract.project && <Row label="Proyecto" value={contract.project} />}
+              {contract.list_price_cents !== null && (
+                <Row
+                  label="Tarifa al contratar"
+                  value={
+                    <span className="tabular">
+                      {formatMoney(contract.list_price_cents, contract.currency)}
+                      {deviation && deviation.diff !== 0 && (
+                        <span className="block text-xs text-muted-foreground">
+                          {deviation.diff < 0 ? "Descuento" : "Suplemento"} {formatMoney(Math.abs(deviation.diff), contract.currency)}
+                          {deviation.pct !== null && ` (${deviation.pct > 0 ? "+" : ""}${formatPercent(deviation.pct)} %)`}
+                        </span>
+                      )}
+                      {snapshot?.captured_at && (
+                        <span className="block text-xs text-subtle-foreground">
+                          Copia del catálogo del {formatDate(snapshot.captured_at.slice(0, 10))}
+                        </span>
+                      )}
+                    </span>
+                  }
+                />
+              )}
               <Row label="Inicio" value={formatDate(contract.start_date)} />
               <Row label="Finalización" value={formatDate(contract.end_date)} />
               {recurring && <Row label="Próxima renovación" value={formatDate(contract.next_renewal_date)} />}

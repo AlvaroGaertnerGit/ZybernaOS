@@ -67,6 +67,34 @@ export const optionalMoneyCents = (label: string) =>
     return cents;
   });
 
+/** Importe opcional que admite negativos (p. ej. pérdidas como base de un variable). */
+export const optionalSignedMoneyCents = (label: string) =>
+  z.string().trim().transform((v, ctx) => {
+    if (v === "") return null;
+    const negative = /^-/.test(v);
+    const cents = parseMoneyToCents(negative ? v.slice(1) : v);
+    if (cents === null) {
+      ctx.addIssue({ code: "custom", message: `${label}: importe no válido` });
+      return z.NEVER;
+    }
+    return negative ? -cents : cents;
+  });
+
+/** Porcentaje opcional mayor que 0 y hasta 100, con 2 decimales como máximo. */
+export const optionalPercent = (label: string) =>
+  z
+    .string()
+    .trim()
+    .transform((v, ctx) => {
+      if (v === "") return null;
+      const n = Number(v.replace("%", "").replace(",", ".").trim());
+      if (!Number.isFinite(n) || n <= 0 || n > 100 || Math.abs(Math.round(n * 100) - n * 100) > 1e-6) {
+        ctx.addIssue({ code: "custom", message: `${label}: porcentaje no válido (mayor que 0 y hasta 100)` });
+        return z.NEVER;
+      }
+      return n;
+    });
+
 /** Porcentaje de impuesto opcional (0–100, 2 decimales). Nunca se aplica por defecto. */
 export const optionalTaxRate = z
   .string()

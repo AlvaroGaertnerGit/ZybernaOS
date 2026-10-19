@@ -12,6 +12,7 @@ type IntervalUnit = "day" | "week" | "month" | "year";
 type ContractStatus = "draft" | "active" | "paused" | "finished" | "cancelled";
 type PaymentStatus = "pending" | "partial" | "paid" | "overdue" | "void";
 type TransactionKind = "payment" | "adjustment";
+type VariableBasis = "profit" | "revenue" | "billing";
 
 type Table<Row, Required extends keyof Row, Generated extends keyof Row = never> = {
   Row: Row;
@@ -65,6 +66,40 @@ export type ServiceCatalogRow = {
   suggested_billing_type: BillingType;
   suggested_periodicity: Periodicity | null;
   status: CatalogStatus;
+  /** Identificador estable (no editable) que usan las reglas de combinación. */
+  key: string;
+  /** Grupo de alternativas: solo un servicio del grupo por cliente y proyecto. */
+  exclusive_group: string | null;
+  /** Requiere uno de estos servicios ("key" o "group:<grupo>") en el mismo cliente y proyecto. */
+  requires_any: string[];
+  /** Incompatible con estos servicios (keys) en el mismo cliente y proyecto. */
+  excludes: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export type CatalogModalityRow = {
+  id: string;
+  service_id: string;
+  billing_type: BillingType;
+  periodicity: Periodicity | null;
+  price_cents: number | null;
+  position: number;
+  created_at: string;
+}
+
+export type VariablePeriodRow = {
+  id: string;
+  client_service_id: string;
+  period_start: string;
+  period_end: string;
+  rate: number;
+  basis: VariableBasis;
+  base_amount_cents: number | null;
+  result_cents: number | null;
+  payment_id: string | null;
+  notes: string | null;
+  created_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -136,6 +171,13 @@ export type ContractRow = {
   status: ContractStatus;
   owner_id: string | null;
   notes: string | null;
+  /** Proyecto o web: distingue contrataciones del mismo servicio para un cliente. */
+  project: string | null;
+  /** Tarifa del catálogo al contratar (copia; no cambia con el catálogo). */
+  list_price_cents: number | null;
+  catalog_snapshot: Json | null;
+  variable_rate: number | null;
+  variable_basis: VariableBasis | null;
   mrr_cents: number;
   import_batch_id: string | null;
   created_by: string | null;
@@ -222,6 +264,7 @@ export type ContractsViewRow = ContractRow & {
   category_name: string;
   category_slug: string;
   catalog_name: string | null;
+  catalog_key: string | null;
   owner_name: string | null;
 }
 
@@ -233,16 +276,22 @@ export type Database = {
       profiles: Table<ProfileRow, "id" | "email">;
       agency_settings: Table<AgencySettingsRow, never>;
       service_categories: Table<ServiceCategoryRow, "slug" | "name", "id">;
-      service_catalog: Table<ServiceCatalogRow, "category_id" | "name", "id">;
+      service_catalog: Table<ServiceCatalogRow, "category_id" | "name", "id" | "key">;
+      service_catalog_modalities: Table<CatalogModalityRow, "service_id" | "billing_type", "id">;
       service_catalog_deliverables: Table<CatalogDeliverableRow, "service_id" | "title", "id">;
       clients: Table<ClientRow, "trade_name", "id">;
       client_notes: Table<ClientNoteRow, "client_id" | "body", "id">;
       client_services: Table<
         ContractRow,
         "client_id" | "category_id" | "name" | "amount_cents" | "billing_type",
-        "id" | "mrr_cents"
+        "id" | "mrr_cents" | "list_price_cents" | "catalog_snapshot"
       >;
       client_service_deliverables: Table<ContractDeliverableRow, "client_service_id" | "title", "id">;
+      contract_variable_periods: Table<
+        VariablePeriodRow,
+        "client_service_id" | "period_start" | "period_end" | "rate" | "basis",
+        "id" | "result_cents"
+      >;
       payments: Table<PaymentRow, "client_id" | "concept" | "amount_due_cents" | "due_date", "id" | "amount_paid_cents" | "last_paid_on">;
       payment_transactions: Table<TransactionRow, "payment_id" | "amount_cents" | "idempotency_key", "id">;
       activity_log: Table<ActivityRow, "action" | "entity_type" | "summary", "id">;
@@ -269,6 +318,12 @@ export type Database = {
         Args: { p_period_start: string; p_period_end: string; p_series_start: string; p_today: string };
         Returns: Json;
       };
+      save_catalog_service: {
+        Args: { p_id: string | null; p_values: Json; p_deliverables: Json; p_modalities: Json };
+        Returns: string;
+      };
+      create_variable_payment: { Args: { p_period_id: string; p_due_date: string }; Returns: string };
+      variable_summary: { Args: { p_period_start: string; p_period_end: string }; Returns: Json };
       import_workbook: {
         Args: { p_payload: Json; p_mode: string; p_file_name?: string; p_file_sha256?: string };
         Returns: Json;
